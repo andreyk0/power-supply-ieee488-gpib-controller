@@ -40,3 +40,6 @@ test?
 vset 1 1.2; vset 2 2.3
 ```
 
+Interface: 4wire (Gnd, Vcc, Rx, Tx), 115200, no flow control.
+
+Signal levels: TTL 3.3V (works with 5V FTDI cable too).
