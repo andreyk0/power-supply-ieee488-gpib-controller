@@ -20,6 +20,11 @@ embedded-hal = "0.2.4"
 usb-device = "0.2.7"
 usbd-serial =  { git = "https://github.com/mvirkkunen/usbd-serial" }
 
+embedded-graphics = "0.6.2"
+st7920 = "0.2.2"
+
+embedded-sdmmc = "0.3.0"
+
 [dependencies.stm32f1]
 version = "0.12.1"
 features = ["stm32f103", "rt"]
