@@ -1,4 +1,4 @@
-NAME?=blink
+NAME?=controller
 # debug | release
 BUILD?=debug
 ELF_TARGET:=target/thumbv7m-none-eabi/$(BUILD)/$(NAME)

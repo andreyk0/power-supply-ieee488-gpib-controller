@@ -1,6 +1,8 @@
 #![deny(unsafe_code)]
-#![deny(warnings)]
 #![no_std]
 
 pub mod consts;
+pub mod sdcard;
+pub mod serial;
 pub mod types;
+pub mod usbserial;

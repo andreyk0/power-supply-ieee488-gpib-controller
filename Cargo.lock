@@ -389,6 +389,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
+name = "stm32-usbd"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70d13eca735cae37df697f599777b000cc0ee924df8452f2b4bfaa6798ab0338"
+dependencies = [
+ "cortex-m",
+ "usb-device",
+ "vcell",
+]
+
+[[package]]
 name = "stm32f1"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -424,6 +435,7 @@ dependencies = [
  "embedded-dma",
  "embedded-hal",
  "nb 0.1.3",
+ "stm32-usbd",
  "stm32f1 0.11.0",
  "void",
 ]
