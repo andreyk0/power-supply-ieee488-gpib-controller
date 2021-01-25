@@ -10,6 +10,7 @@ use cortex_m_semihosting::dbg;
 use stm32f1xx_hal::{delay, gpio, i2c, pac, prelude::*, serial, spi, time, timer, usb};
 
 use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::spi as espi;
 
 use rtic::cyccnt::Duration;
 
@@ -26,7 +27,7 @@ use embedded_graphics::{
 
 use st7920::ST7920;
 
-use power_supply_ieee488_gpib_controller::{consts::*, types::*, usbserial};
+use power_supply_ieee488_gpib_controller::{consts::*, sdcard, types::*, usbserial};
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
             peripherals = true,
@@ -165,10 +166,7 @@ const APP: () = {
             device.SPI1,
             (lcd_sck, spi::NoMiso, lcd_mosi),
             &mut afio.mapr,
-            spi::Mode {
-                polarity: spi::Polarity::IdleLow,
-                phase: spi::Phase::CaptureOnFirstTransition,
-            },
+            espi::MODE_0,
             time::Hertz(600_000),
             clocks,
             &mut rcc.apb2,
@@ -190,6 +188,67 @@ const APP: () = {
         t.draw(&mut display).unwrap();
 
         display.flush(&mut delay).expect("could not flush display");
+
+        #[cfg(dev)]
+        dbg!("sdcard").unwrap();
+
+        let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
+        let sd_miso = gpiob.pb14;
+        let sd_mosi = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
+        let sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+
+        let sd_spi = spi::Spi::spi2(
+            device.SPI2,
+            (sd_sck, sd_miso, sd_mosi),
+            espi::MODE_0,
+            time::Hertz(600_000),
+            clocks,
+            &mut rcc.apb1,
+        );
+
+        let mut sd_cont = embedded_sdmmc::Controller::new(
+            embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
+            sdcard::DummyTimeSource {},
+        );
+
+        #[cfg(dev)]
+        dbg!("Init SD card...").unwrap();
+
+        match sd_cont.device().init() {
+            Ok(_) => {
+                #[cfg(dev)]
+                dbg!("SD init OK!").unwrap();
+                match sd_cont.device().card_size_bytes() {
+                    Ok(size) =>
+                    {
+                        #[cfg(dev)]
+                        dbg!("Card size {}", size).unwrap()
+                    }
+                    Err(e) =>
+                    {
+                        #[cfg(dev)]
+                        dbg!("Err: {:?}", e).unwrap()
+                    }
+                }
+                match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
+                    Ok(v) =>
+                    {
+                        #[cfg(dev)]
+                        dbg!("Volume 0 {:?}", v).unwrap()
+                    }
+                    Err(e) =>
+                    {
+                        #[cfg(dev)]
+                        dbg!("Err: {:?}", e).unwrap()
+                    }
+                }
+            }
+            Err(e) =>
+            {
+                #[cfg(dev)]
+                dbg!(uart_serial, "{:?}!", e).unwrap()
+            }
+        }
 
         #[cfg(dev)]
         dbg!("init::LateResources").unwrap();
