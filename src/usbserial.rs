@@ -1,18 +1,5 @@
-use cortex_m::asm;
-use cortex_m_semihosting::dbg;
-
-use stm32f1xx_hal::{gpio, i2c, prelude::*, timer, usb};
-
-use embedded_hal::digital::v2::OutputPin;
-
-use rtic::cyccnt::Duration;
-
 use usb_device::{bus, prelude::*};
 use usbd_serial::{DefaultBufferStore, Result, SerialPort};
-
-use crate::{consts::*, types::*};
-
-use core::borrow::BorrowMut;
 
 pub struct UsbSerial<'a, B>
 where

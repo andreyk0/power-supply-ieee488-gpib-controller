@@ -5,17 +5,16 @@
 use panic_halt as _;
 
 use cortex_m::asm;
-use cortex_m_semihosting::dbg;
+use cortex_m_semihosting::*;
 
-use stm32f1xx_hal::{delay, gpio, i2c, pac, prelude::*, serial, spi, time, timer, usb};
+use stm32f1xx_hal::{delay, gpio, pac, prelude::*, serial, spi, time, usb};
 
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::spi as espi;
 
 use rtic::cyccnt::Duration;
 
-use usb_device::{bus, prelude::*};
-use usbd_serial::SerialPort;
+use usb_device::bus;
 
 use embedded_graphics::{
     fonts::{Font6x8, Text},
@@ -65,7 +64,7 @@ const APP: () = {
     fn init(cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<usb::UsbBus<usb::Peripheral>>> = None;
 
-        let mut cmcore = cortex_m::peripheral::Peripherals::take().unwrap();
+        let cmcore = cortex_m::peripheral::Peripherals::take().unwrap();
         let mut core: rtic::Peripherals = cx.core;
         let device = cx.device;
         let mut flash = device.FLASH.constrain();
@@ -79,20 +78,17 @@ const APP: () = {
             .pclk1(36.mhz())
             .freeze(&mut flash.acr);
 
-        #[cfg(dev)]
-        dbg!("clocks").unwrap();
+        //hprintln!("clocks").unwrap();
 
         assert!(clocks.usbclk_valid());
 
-        #[cfg(dev)]
-        dbg!("gpio").unwrap();
+        //hprintln!("gpio").unwrap();
 
         let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
         let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
         let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
 
-        #[cfg(dev)]
-        dbg!("blink").unwrap();
+        //hprintln!("blink").unwrap();
 
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
@@ -106,8 +102,7 @@ const APP: () = {
             .blink(cx.start + Duration::from_cycles(SYS_FREQ.0 / 2))
             .unwrap();
 
-        #[cfg(dev)]
-        dbg!("usbp").unwrap();
+        //hprintln!("usbp").unwrap();
 
         // BluePill board has a pull-up resistor on the D+ line.
         // Pull the D+ pin down to send a RESET condition to the USB bus.
@@ -126,19 +121,16 @@ const APP: () = {
             pin_dp: usb_dp,
         };
 
-        #[cfg(dev)]
-        dbg!("usb_bus").unwrap();
+        //hprintln!("usb_bus").unwrap();
 
         *USB_BUS = Some(usb::UsbBus::new(usbp));
         let usb_bus = USB_BUS.as_ref().unwrap();
 
-        #[cfg(dev)]
-        dbg!("usb_serial").unwrap();
+        //hprintln!("usb_serial").unwrap();
 
         let usb_serial = usbserial::UsbSerial::new(usb_bus);
 
-        #[cfg(dev)]
-        dbg!("uart_serial").unwrap();
+        //hprintln!("uart_serial").unwrap();
 
         let pin_tx = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
         let pin_rx = gpioa.pa3;
@@ -154,8 +146,7 @@ const APP: () = {
 
         uart_serial.listen(serial::Event::Rxne);
 
-        #[cfg(dev)]
-        dbg!("display").unwrap();
+        //hprintln!("display").unwrap();
 
         let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
         let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
@@ -189,8 +180,7 @@ const APP: () = {
 
         display.flush(&mut delay).expect("could not flush display");
 
-        #[cfg(dev)]
-        dbg!("sdcard").unwrap();
+        //hprintln!("sdcard").unwrap();
 
         let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
         let sd_miso = gpiob.pb14;
@@ -211,47 +201,34 @@ const APP: () = {
             sdcard::DummyTimeSource {},
         );
 
-        #[cfg(dev)]
-        dbg!("Init SD card...").unwrap();
+        //hprintln!("Init SD card...").unwrap();
 
         match sd_cont.device().init() {
             Ok(_) => {
-                #[cfg(dev)]
-                dbg!("SD init OK!").unwrap();
+                //hprintln!("SD init OK!").unwrap();
                 match sd_cont.device().card_size_bytes() {
-                    Ok(size) =>
-                    {
-                        #[cfg(dev)]
-                        dbg!("Card size {}", size).unwrap()
+                    Ok(size) => {
+                        //hprintln!("Card size {}", size).unwrap()
                     }
-                    Err(e) =>
-                    {
-                        #[cfg(dev)]
-                        dbg!("Err: {:?}", e).unwrap()
+                    Err(e) => {
+                        //hprintln!("Err: {:?}", e).unwrap()
                     }
                 }
                 match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
-                    Ok(v) =>
-                    {
-                        #[cfg(dev)]
-                        dbg!("Volume 0 {:?}", v).unwrap()
+                    Ok(v) => {
+                        //hprintln!("Volume 0 {:?}", v).unwrap()
                     }
-                    Err(e) =>
-                    {
-                        #[cfg(dev)]
-                        dbg!("Err: {:?}", e).unwrap()
+                    Err(e) => {
+                        //hprintln!("Err: {:?}", e).unwrap()
                     }
                 }
             }
-            Err(e) =>
-            {
-                #[cfg(dev)]
-                dbg!(uart_serial, "{:?}!", e).unwrap()
+            Err(e) => {
+                //hprintln!("{:?}!", e).unwrap()
             }
         }
 
-        #[cfg(dev)]
-        dbg!("init::LateResources").unwrap();
+        //hprintln!("init::LateResources").unwrap();
         init::LateResources {
             led,
             usb_serial,
@@ -293,7 +270,7 @@ const APP: () = {
     #[task(binds = USART2,
         resources = [uart_serial],
         priority = 2)]
-    fn uart_poll(cx: uart_poll::Context) {}
+    fn uart_poll(_cx: uart_poll::Context) {}
 
     // RTIC requires that unused interrupts are declared in an extern block when
     // using software tasks; these free interrupts will be used to dispatch the
