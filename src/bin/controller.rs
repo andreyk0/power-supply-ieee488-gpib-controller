@@ -201,31 +201,21 @@ const APP: () = {
             sdcard::DummyTimeSource {},
         );
 
-        //hprintln!("Init SD card...").unwrap();
+        hprintln!("Init SD card...").unwrap();
 
         match sd_cont.device().init() {
             Ok(_) => {
-                //hprintln!("SD init OK!").unwrap();
+                hprintln!("SD init OK!").unwrap();
                 match sd_cont.device().card_size_bytes() {
-                    Ok(size) => {
-                        //hprintln!("Card size {}", size).unwrap()
-                    }
-                    Err(e) => {
-                        //hprintln!("Err: {:?}", e).unwrap()
-                    }
+                    Ok(size) => hprintln!("Card size {}", size).unwrap(),
+                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
                 }
                 match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
-                    Ok(v) => {
-                        //hprintln!("Volume 0 {:?}", v).unwrap()
-                    }
-                    Err(e) => {
-                        //hprintln!("Err: {:?}", e).unwrap()
-                    }
+                    Ok(v) => hprintln!("Volume 0 {:?}", v).unwrap(),
+                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
                 }
             }
-            Err(e) => {
-                //hprintln!("{:?}!", e).unwrap()
-            }
+            Err(e) => hprintln!("{:?}!", e).unwrap(),
         }
 
         //hprintln!("init::LateResources").unwrap();
