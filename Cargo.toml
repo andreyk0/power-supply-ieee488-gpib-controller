@@ -37,7 +37,7 @@ features = ["rt", "stm32f103", "medium", "stm32-usbd"]
 codegen-units = 1 # better optimizations
 
 # optimize for size ('s' or 'z' would optimize even more)
-opt-level = 's'
+opt-level = 'z'
 
 # enable debugging in dev mode.
 debug = true
@@ -61,7 +61,7 @@ debug = false
 
 # Optimize all the other dependencies
 [profile.dev.package."*"]
-opt-level = "s"
+opt-level = "z"
 
 [profile.release.package."*"]
 opt-level = "s"
