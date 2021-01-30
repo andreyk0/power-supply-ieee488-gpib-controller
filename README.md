@@ -11,7 +11,7 @@ Connector: [FTDI USB serial adapter](https://microcontrollerslab.com/ftdi-usb-to
 
 Example `picocom` session
 
-``` bash
+```bash
 picocom --baud 115200 --imap lfcrlf --echo /dev/ttyUSB0
 ```
 
@@ -43,3 +43,13 @@ vset 1 1.2; vset 2 2.3
 Interface: 4wire (Gnd, Vcc, Rx, Tx), 115200, no flow control.
 
 Signal levels: TTL 3.3V (works with 5V FTDI cable too).
+
+
+### MCU serial
+
+Testing MCU serial - to - UART via USB serial
+
+``` bash
+picocom --baud 115200 --imap crcrlf --echo /dev/ttyUSB0
+picocom --baud 115200 --imap crcrlf --echo /dev/ttyACM0
+```

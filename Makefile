@@ -30,6 +30,9 @@ flash: bin erase
 erase:
 	st-flash erase
 
+size:
+	cargo size --bin $(NAME) -- -A
+
 clean:
 	cargo clean
 

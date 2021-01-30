@@ -1,4 +1,3 @@
-#![deny(unsafe_code)]
 #![cfg_attr(not(doc), no_main)]
 #![no_std]
 
@@ -25,6 +24,9 @@ use embedded_graphics::{
 };
 
 use st7920::ST7920;
+
+use heapless::consts::*;
+use heapless::Vec;
 
 use power_supply_ieee488_gpib_controller::{consts::*, sdcard, types::*, usbserial};
 
@@ -64,7 +66,7 @@ const APP: () = {
     fn init(cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<usb::UsbBus<usb::Peripheral>>> = None;
 
-        let cmcore = cortex_m::peripheral::Peripherals::take().unwrap();
+        //let cmcore = cortex_m::peripheral::Peripherals::take().unwrap();
         let mut core: rtic::Peripherals = cx.core;
         let device = cx.device;
         let mut flash = device.FLASH.constrain();
@@ -78,17 +80,17 @@ const APP: () = {
             .pclk1(36.mhz())
             .freeze(&mut flash.acr);
 
-        //hprintln!("clocks").unwrap();
+        hprintln!("clocks").unwrap();
 
         assert!(clocks.usbclk_valid());
 
-        //hprintln!("gpio").unwrap();
+        hprintln!("gpio").unwrap();
 
         let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
         let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
         let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
 
-        //hprintln!("blink").unwrap();
+        hprintln!("blink").unwrap();
 
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
@@ -102,7 +104,7 @@ const APP: () = {
             .blink(cx.start + Duration::from_cycles(SYS_FREQ.0 / 2))
             .unwrap();
 
-        //hprintln!("usbp").unwrap();
+        hprintln!("usbp").unwrap();
 
         // BluePill board has a pull-up resistor on the D+ line.
         // Pull the D+ pin down to send a RESET condition to the USB bus.
@@ -121,16 +123,16 @@ const APP: () = {
             pin_dp: usb_dp,
         };
 
-        //hprintln!("usb_bus").unwrap();
+        hprintln!("usb_bus").unwrap();
 
         *USB_BUS = Some(usb::UsbBus::new(usbp));
         let usb_bus = USB_BUS.as_ref().unwrap();
 
-        //hprintln!("usb_serial").unwrap();
+        hprintln!("usb_serial").unwrap();
 
         let usb_serial = usbserial::UsbSerial::new(usb_bus);
 
-        //hprintln!("uart_serial").unwrap();
+        hprintln!("uart_serial").unwrap();
 
         let pin_tx = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
         let pin_rx = gpioa.pa3;
@@ -146,79 +148,81 @@ const APP: () = {
 
         uart_serial.listen(serial::Event::Rxne);
 
-        //hprintln!("display").unwrap();
+        /*
+               hprintln!("display").unwrap();
 
-        let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
-        let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
-        let lcd_reset = gpioa.pa6.into_push_pull_output(&mut gpioa.crl);
-        let lcd_cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+               let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
+               let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
+               let lcd_reset = gpioa.pa6.into_push_pull_output(&mut gpioa.crl);
+               let lcd_cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
 
-        let lcd_spi = spi::Spi::spi1(
-            device.SPI1,
-            (lcd_sck, spi::NoMiso, lcd_mosi),
-            &mut afio.mapr,
-            espi::MODE_0,
-            time::Hertz(600_000),
-            clocks,
-            &mut rcc.apb2,
-        );
+               let lcd_spi = spi::Spi::spi1(
+                   device.SPI1,
+                   (lcd_sck, spi::NoMiso, lcd_mosi),
+                   &mut afio.mapr,
+                   espi::MODE_0,
+                   time::Hertz(600_000),
+                   clocks,
+                   &mut rcc.apb2,
+               );
 
-        let mut delay = delay::Delay::new(cmcore.SYST, clocks);
+               let mut delay = delay::Delay::new(cmcore.SYST, clocks);
 
-        let mut display = ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false);
+               let mut display = ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false);
 
-        display.init(&mut delay).expect("could not init display");
-        display.clear(&mut delay).expect("could not clear display");
+               display.init(&mut delay).expect("could not init display");
+               display.clear(&mut delay).expect("could not clear display");
 
-        let c = Circle::new(Point::new(20, 20), 8)
-            .into_styled(PrimitiveStyle::with_fill(BinaryColor::On));
-        let t = Text::new("Hello Rust!", Point::new(40, 16))
-            .into_styled(TextStyle::new(Font6x8, BinaryColor::On));
+               let c = Circle::new(Point::new(20, 20), 8)
+                   .into_styled(PrimitiveStyle::with_fill(BinaryColor::On));
+               let t = Text::new("Hello Rust!", Point::new(40, 16))
+                   .into_styled(TextStyle::new(Font6x8, BinaryColor::On));
 
-        c.draw(&mut display).unwrap();
-        t.draw(&mut display).unwrap();
+               c.draw(&mut display).unwrap();
+               t.draw(&mut display).unwrap();
 
-        display.flush(&mut delay).expect("could not flush display");
+               display.flush(&mut delay).expect("could not flush display");
 
-        //hprintln!("sdcard").unwrap();
+               hprintln!("sdcard").unwrap();
 
-        let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
-        let sd_miso = gpiob.pb14;
-        let sd_mosi = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
-        let sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+               let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
+               let sd_miso = gpiob.pb14;
+               let sd_mosi = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
+               let sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
 
-        let sd_spi = spi::Spi::spi2(
-            device.SPI2,
-            (sd_sck, sd_miso, sd_mosi),
-            espi::MODE_0,
-            time::Hertz(600_000),
-            clocks,
-            &mut rcc.apb1,
-        );
+               let sd_spi = spi::Spi::spi2(
+                   device.SPI2,
+                   (sd_sck, sd_miso, sd_mosi),
+                   espi::MODE_0,
+                   time::Hertz(600_000),
+                   clocks,
+                   &mut rcc.apb1,
+               );
 
-        let mut sd_cont = embedded_sdmmc::Controller::new(
-            embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
-            sdcard::DummyTimeSource {},
-        );
+               let mut sd_cont = embedded_sdmmc::Controller::new(
+                   embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
+                   sdcard::DummyTimeSource {},
+               );
 
-        hprintln!("Init SD card...").unwrap();
+               hprintln!("Init SD card...").unwrap();
 
-        match sd_cont.device().init() {
-            Ok(_) => {
-                hprintln!("SD init OK!").unwrap();
-                match sd_cont.device().card_size_bytes() {
-                    Ok(size) => hprintln!("Card size {}", size).unwrap(),
-                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
-                }
-                match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
-                    Ok(v) => hprintln!("Volume 0 {:?}", v).unwrap(),
-                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
-                }
-            }
-            Err(e) => hprintln!("{:?}!", e).unwrap(),
-        }
+               match sd_cont.device().init() {
+                   Ok(_) => {
+                       hprintln!("SD init OK!").unwrap();
+                       match sd_cont.device().card_size_bytes() {
+                           Ok(size) => hprintln!("Card size {}", size).unwrap(),
+                           Err(e) => hprintln!("Err: {:?}", e).unwrap(),
+                       }
+                       match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
+                           Ok(v) => hprintln!("Volume 0 {:?}", v).unwrap(),
+                           Err(e) => hprintln!("Err: {:?}", e).unwrap(),
+                       }
+                   }
+                   Err(e) => hprintln!("{:?}!", e).unwrap(),
+               }
+        */
 
-        //hprintln!("init::LateResources").unwrap();
+        hprintln!("init::LateResources").unwrap();
         init::LateResources {
             led,
             usb_serial,
@@ -226,10 +230,27 @@ const APP: () = {
         }
     }
 
-    #[idle()]
-    fn idle(_ctx: idle::Context) -> ! {
+    #[idle(resources = [usb_serial])]
+    fn idle(mut cx: idle::Context) -> ! {
+        let foo = "foo\n";
+
         loop {
-            asm::delay(SYS_FREQ.0 / 10000);
+            asm::delay(3 * SYS_FREQ.0);
+
+            //            let mut data: [u8; 8] = [0; 8];
+
+            /*
+            cx.resources.usb_serial.lock(|s| match s.read(&mut data) {
+                Ok(_) => {
+                    //s.write("foo".as_bytes()).unwrap();
+                }
+                Err(_) => {}
+            });
+             */
+
+            //cx.resources.usb_serial.lock(|s| s.write(foo.as_bytes()));
+
+            //hprintln!("R: {:?}", data);
         }
     }
 
@@ -244,23 +265,45 @@ const APP: () = {
     }
 
     #[task(binds = USB_HP_CAN_TX,
-        resources = [usb_serial],
-        priority = 2)]
+            resources = [usb_serial],
+            priority = 2)]
     fn usb_tx(cx: usb_tx::Context) {
         cx.resources.usb_serial.poll();
     }
-
     #[task(binds = USB_LP_CAN_RX0,
-        resources = [usb_serial],
-        priority = 2)]
+            resources = [usb_serial, uart_serial],
+            priority = 2)]
     fn usb_rx(cx: usb_rx::Context) {
         cx.resources.usb_serial.poll();
+
+        let mut buf: [u8; 16] = [0; 16];
+        match cx.resources.usb_serial.read(&mut buf) {
+            Ok(s) if s > 0 => {
+                for c in &buf[0..s] {
+                    cx.resources.uart_serial.write(*c).map_or((), |_| ())
+                }
+                cx.resources.uart_serial.flush().map_or((), |_| ());
+            }
+            _ => {}
+        }
     }
 
     #[task(binds = USART2,
-        resources = [uart_serial],
+        resources = [uart_serial, usb_serial],
         priority = 2)]
-    fn uart_poll(_cx: uart_poll::Context) {}
+    fn uart_poll(cx: uart_poll::Context) {
+        let mut buf: Vec<u8, U16> = Vec::new();
+
+        while cx
+            .resources
+            .uart_serial
+            .read()
+            .map_or(false, |c| buf.push(c).map_or(false, |_| true))
+        { /**/ }
+
+        // Ignore USB errors (may not be connected)
+        cx.resources.usb_serial.write(&buf).map_or((), |_| ());
+    }
 
     // RTIC requires that unused interrupts are declared in an extern block when
     // using software tasks; these free interrupts will be used to dispatch the

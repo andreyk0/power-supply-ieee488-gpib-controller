@@ -297,6 +297,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-hal",
  "embedded-sdmmc",
+ "heapless",
  "panic-halt",
  "st7920",
  "stm32f1 0.12.1",

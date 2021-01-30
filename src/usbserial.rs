@@ -15,14 +15,17 @@ where
 {
     /// New usb serial
     pub fn new<'a>(usb_bus: &'a bus::UsbBusAllocator<B>) -> UsbSerial<'a, B> {
+        // this has to go before UsbDeviceBuilder, it mutably borrows from
+        // refcells but doesn't exit scope and anything else trying to do
+        // the same panics in refcell's borrow mut call
+        let serial_port = SerialPort::new(&usb_bus);
+
         let usb_device = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
             .manufacturer("DIY")
-            .product("power-supply-ieee488-gpib-controller")
+            .product("PS-GPIB")
             .serial_number("1")
             .device_class(usbd_serial::USB_CLASS_CDC)
             .build();
-
-        let serial_port = SerialPort::new(&usb_bus);
 
         UsbSerial {
             serial_port,
@@ -42,12 +45,24 @@ where
     /// Serial read
     #[inline]
     pub fn read(&mut self, data: &mut [u8]) -> Result<usize> {
-        self.serial_port.read(data)
+        self.poll();
+
+        if self.serial_port.dtr() {
+            self.serial_port.read(data)
+        } else {
+            Ok(0)
+        }
     }
 
     /// Serial write
     #[inline]
     pub fn write(&mut self, data: &[u8]) -> Result<usize> {
-        self.serial_port.write(data)
+        self.poll();
+
+        if self.serial_port.dtr() {
+            self.serial_port.write(data)
+        } else {
+            Ok(0)
+        }
     }
 }

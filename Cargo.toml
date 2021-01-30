@@ -25,6 +25,9 @@ st7920 = "0.2.2"
 
 embedded-sdmmc = "0.3.0"
 
+heapless = "0.5.6"
+
+
 [dependencies.stm32f1]
 version = "0.12.1"
 features = ["stm32f103", "rt"]
@@ -62,6 +65,7 @@ debug = false
 # Optimize all the other dependencies
 [profile.dev.package."*"]
 opt-level = "z"
+debug = false
 
 [profile.release.package."*"]
 opt-level = "s"
