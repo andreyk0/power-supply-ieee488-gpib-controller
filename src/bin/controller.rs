@@ -28,7 +28,9 @@ use st7920::ST7920;
 use heapless::consts::*;
 use heapless::Vec;
 
-use power_supply_ieee488_gpib_controller::{consts::*, sdcard, types::*, usbserial};
+use power_supply_ieee488_gpib_controller::{
+    consts::*, delay::AsmDelay, sdcard, types::*, usbserial,
+};
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
             peripherals = true,
@@ -66,7 +68,6 @@ const APP: () = {
     fn init(cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<usb::UsbBus<usb::Peripheral>>> = None;
 
-        //let cmcore = cortex_m::peripheral::Peripherals::take().unwrap();
         let mut core: rtic::Peripherals = cx.core;
         let device = cx.device;
         let mut flash = device.FLASH.constrain();
@@ -148,62 +149,62 @@ const APP: () = {
 
         uart_serial.listen(serial::Event::Rxne);
 
+        hprintln!("display").unwrap();
+
+        let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
+        let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
+        let lcd_reset = gpioa.pa6.into_push_pull_output(&mut gpioa.crl);
+        let lcd_cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+
+        let lcd_spi = spi::Spi::spi1(
+            device.SPI1,
+            (lcd_sck, spi::NoMiso, lcd_mosi),
+            &mut afio.mapr,
+            espi::MODE_0,
+            time::Hertz(600_000),
+            clocks,
+            &mut rcc.apb2,
+        );
+
+        let mut delay = AsmDelay {};
+
+        let mut display = ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false);
+
+        display.init(&mut delay).expect("could not init display");
+        display.clear(&mut delay).expect("could not clear display");
+
+        let c = Circle::new(Point::new(20, 20), 8)
+            .into_styled(PrimitiveStyle::with_fill(BinaryColor::On));
+        let t = Text::new("Hello Rust!", Point::new(40, 16))
+            .into_styled(TextStyle::new(Font6x8, BinaryColor::On));
+
+        c.draw(&mut display).unwrap();
+        t.draw(&mut display).unwrap();
+
+        display.flush(&mut delay).expect("could not flush display");
+
+        hprintln!("sdcard").unwrap();
+
+        let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
+        let sd_miso = gpiob.pb14;
+        let sd_mosi = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
+        let sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+
+        let sd_spi = spi::Spi::spi2(
+            device.SPI2,
+            (sd_sck, sd_miso, sd_mosi),
+            espi::MODE_0,
+            time::Hertz(600_000),
+            clocks,
+            &mut rcc.apb1,
+        );
+
+        let mut sd_cont = embedded_sdmmc::Controller::new(
+            embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
+            sdcard::DummyTimeSource {},
+        );
+
         /*
-               hprintln!("display").unwrap();
-
-               let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
-               let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
-               let lcd_reset = gpioa.pa6.into_push_pull_output(&mut gpioa.crl);
-               let lcd_cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
-
-               let lcd_spi = spi::Spi::spi1(
-                   device.SPI1,
-                   (lcd_sck, spi::NoMiso, lcd_mosi),
-                   &mut afio.mapr,
-                   espi::MODE_0,
-                   time::Hertz(600_000),
-                   clocks,
-                   &mut rcc.apb2,
-               );
-
-               let mut delay = delay::Delay::new(cmcore.SYST, clocks);
-
-               let mut display = ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false);
-
-               display.init(&mut delay).expect("could not init display");
-               display.clear(&mut delay).expect("could not clear display");
-
-               let c = Circle::new(Point::new(20, 20), 8)
-                   .into_styled(PrimitiveStyle::with_fill(BinaryColor::On));
-               let t = Text::new("Hello Rust!", Point::new(40, 16))
-                   .into_styled(TextStyle::new(Font6x8, BinaryColor::On));
-
-               c.draw(&mut display).unwrap();
-               t.draw(&mut display).unwrap();
-
-               display.flush(&mut delay).expect("could not flush display");
-
-               hprintln!("sdcard").unwrap();
-
-               let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
-               let sd_miso = gpiob.pb14;
-               let sd_mosi = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
-               let sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
-
-               let sd_spi = spi::Spi::spi2(
-                   device.SPI2,
-                   (sd_sck, sd_miso, sd_mosi),
-                   espi::MODE_0,
-                   time::Hertz(600_000),
-                   clocks,
-                   &mut rcc.apb1,
-               );
-
-               let mut sd_cont = embedded_sdmmc::Controller::new(
-                   embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
-                   sdcard::DummyTimeSource {},
-               );
-
                hprintln!("Init SD card...").unwrap();
 
                match sd_cont.device().init() {
