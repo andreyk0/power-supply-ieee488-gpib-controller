@@ -18,14 +18,14 @@ cortex-m-rtic = "0.5.5"
 embedded-hal = "0.2.4"
 
 usb-device = "0.2.7"
-usbd-serial =  { git = "https://github.com/mvirkkunen/usbd-serial" }
+usbd-serial =  { git = "https://github.com/mvirkkunen/usbd-serial#f6e7834a470246c191a6f027252816710b23deb8" }
 
 embedded-graphics = "0.6.2"
 st7920 = "0.2.2"
 
-embedded-sdmmc = "0.3.0"
+embedded-sdmmc = { git = "https://github.com/andreyk0/embedded-sdmmc-rs.git#92dab4392ae8503acb37072556e3c59fc9eee527" }
 
-heapless = "0.5.6"
+heapless = "0.6.0"
 
 
 [dependencies.stm32f1]

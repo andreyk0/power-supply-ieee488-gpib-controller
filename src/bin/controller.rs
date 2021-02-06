@@ -188,40 +188,47 @@ const APP: () = {
         let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
         let sd_miso = gpiob.pb14;
         let sd_mosi = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
-        let sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+        let mut sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
 
-        let sd_spi = spi::Spi::spi2(
+        let mut sd_spi = spi::Spi::spi2(
             device.SPI2,
             (sd_sck, sd_miso, sd_mosi),
             espi::MODE_0,
-            time::Hertz(600_000),
+            time::Hertz(400_000),
             clocks,
             &mut rcc.apb1,
         );
+
+        sd_cs.set_low();
+        delay.delay_us(10000);
 
         let mut sd_cont = embedded_sdmmc::Controller::new(
             embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
             sdcard::DummyTimeSource {},
         );
 
-        /*
-               hprintln!("Init SD card...").unwrap();
+        //hprintln!("Init SD card...").unwrap();
 
-               match sd_cont.device().init() {
-                   Ok(_) => {
-                       hprintln!("SD init OK!").unwrap();
-                       match sd_cont.device().card_size_bytes() {
-                           Ok(size) => hprintln!("Card size {}", size).unwrap(),
-                           Err(e) => hprintln!("Err: {:?}", e).unwrap(),
-                       }
-                       match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
-                           Ok(v) => hprintln!("Volume 0 {:?}", v).unwrap(),
-                           Err(e) => hprintln!("Err: {:?}", e).unwrap(),
-                       }
-                   }
-                   Err(e) => hprintln!("{:?}!", e).unwrap(),
-               }
-        */
+        let mut sdres = sd_cont.device().init();
+        while sdres.is_err() {
+            hprintln!("{:?}!", sdres).unwrap();
+            sdres = sd_cont.device().init();
+        }
+
+        match sdres {
+            Ok(_) => {
+                hprintln!("SD init OK!").unwrap();
+                match sd_cont.device().card_size_bytes() {
+                    Ok(size) => hprintln!("Card size {}", size).unwrap(),
+                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
+                }
+                match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
+                    Ok(v) => hprintln!("Volume 0 {:?}", v).unwrap(),
+                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
+                }
+            }
+            Err(e) => hprintln!("{:?}!", e).unwrap(),
+        }
 
         hprintln!("init::LateResources").unwrap();
         init::LateResources {

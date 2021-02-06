@@ -105,7 +105,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "cortex-m-rtic-macros",
- "heapless",
+ "heapless 0.5.6",
  "rtic-core",
  "version_check",
 ]
@@ -162,8 +162,7 @@ dependencies = [
 [[package]]
 name = "embedded-sdmmc"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d3bf0a2b5becb87e9a329d9290f131e4d10fec39b56d129926826a7cbea1e7a"
+source = "git+https://github.com/andreyk0/embedded-sdmmc-rs.git#92dab4392ae8503acb37072556e3c59fc9eee527#5d7a5744198055bd783c5b16ae7e372d6aa091f0"
 dependencies = [
  "byteorder",
  "embedded-hal",
@@ -222,6 +221,18 @@ checksum = "74911a68a1658cfcfb61bc0ccfbd536e3b6e906f8c2f7883ee50157e3e2184f1"
 dependencies = [
  "as-slice",
  "generic-array 0.13.2",
+ "hash32",
+ "stable_deref_trait",
+]
+
+[[package]]
+name = "heapless"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "efb22866f8416bc2b65389ebcb8b48e1be541650c44063ea1288d04bcf903808"
+dependencies = [
+ "as-slice",
+ "generic-array 0.14.4",
  "hash32",
  "stable_deref_trait",
 ]
@@ -297,7 +308,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-hal",
  "embedded-sdmmc",
- "heapless",
+ "heapless 0.6.0",
  "panic-halt",
  "st7920",
  "stm32f1 0.12.1",
@@ -473,7 +484,7 @@ checksum = "849eed9b4dc61a1f17ba1d7a5078ceb095b9410caa38a506eb281ed5eff12fbd"
 [[package]]
 name = "usbd-serial"
 version = "0.1.1"
-source = "git+https://github.com/mvirkkunen/usbd-serial#f6e7834a470246c191a6f027252816710b23deb8"
+source = "git+https://github.com/mvirkkunen/usbd-serial#f6e7834a470246c191a6f027252816710b23deb8#f6e7834a470246c191a6f027252816710b23deb8"
 dependencies = [
  "embedded-hal",
  "nb 0.1.3",
