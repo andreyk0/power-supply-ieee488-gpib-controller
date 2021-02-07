@@ -48,7 +48,7 @@ debug = true
 
 # link with link time optimization (lto).
 # NOTE: setting this to true upsets GDB, there's a bug somewhere
-lto = false
+lto = true
 
 [profile.release]
 
@@ -63,13 +63,9 @@ lto = true
 # no debug info
 debug = false
 
-[profile.dev.package."embedded-sdmmc"]
-opt-level = "s"
-debug = true
-
 # Optimize all the other dependencies
 [profile.dev.package."*"]
-opt-level = "z"
+opt-level = "s"
 debug = false
 
 [profile.release.package."*"]

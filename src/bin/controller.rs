@@ -6,7 +6,7 @@ use panic_halt as _;
 use cortex_m::asm;
 use cortex_m_semihosting::*;
 
-use stm32f1xx_hal::{delay, gpio, pac, prelude::*, serial, spi, time, usb};
+use stm32f1xx_hal::{prelude::*, serial, spi, time, usb};
 
 use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::spi as espi;
@@ -15,21 +15,13 @@ use rtic::cyccnt::Duration;
 
 use usb_device::bus;
 
-use embedded_graphics::{
-    fonts::{Font6x8, Text},
-    pixelcolor::BinaryColor,
-    prelude::*,
-    primitives::Circle,
-    style::{PrimitiveStyle, TextStyle},
-};
-
 use st7920::ST7920;
 
 use heapless::consts::*;
 use heapless::Vec;
 
 use power_supply_ieee488_gpib_controller::{
-    consts::*, delay::AsmDelay, sdcard, types::*, usbserial,
+    consts::*, display::*, sdcard::*, time::*, types::*, usbserial,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -38,30 +30,10 @@ use power_supply_ieee488_gpib_controller::{
 const APP: () = {
     struct Resources {
         led: LedPin,
-        usb_serial: usbserial::UsbSerial<'static, usb::UsbBus<usb::Peripheral>>,
-        uart_serial: serial::Serial<
-            pac::USART2,
-            (
-                gpio::gpioa::PA2<gpio::Alternate<gpio::PushPull>>,
-                gpio::gpioa::PA3<gpio::Input<gpio::Floating>>,
-            ),
-        >,
-        /*
-                display: ST7920<
-                    spi::Spi<
-                        pac::SPI1,
-                        spi::Spi1NoRemap,
-                        (
-                            gpio::gpioa::PA5<gpio::Alternate<gpio::PushPull>>,
-                            spi::NoMiso,
-                            gpio::gpioa::PA7<gpio::Alternate<gpio::PushPull>>,
-                        ),
-                        u8,
-                    >,
-                    gpio::gpioa::PA6<gpio::Alternate<gpio::PushPull>>,
-                    gpio::gpioa::PA4<gpio::Alternate<gpio::PushPull>>,
-                >,
-        */
+        usb_serial: UsbSerialDevice,
+        uart_serial: UartSerialDevice,
+        display: Display,
+        sdcard: SDCard,
     }
 
     #[init(schedule = [blink])]
@@ -166,22 +138,8 @@ const APP: () = {
             &mut rcc.apb2,
         );
 
-        let mut delay = AsmDelay {};
-
-        let mut display = ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false);
-
-        display.init(&mut delay).expect("could not init display");
-        display.clear(&mut delay).expect("could not clear display");
-
-        let c = Circle::new(Point::new(20, 20), 8)
-            .into_styled(PrimitiveStyle::with_fill(BinaryColor::On));
-        let t = Text::new("Hello Rust!", Point::new(40, 16))
-            .into_styled(TextStyle::new(Font6x8, BinaryColor::On));
-
-        c.draw(&mut display).unwrap();
-        t.draw(&mut display).unwrap();
-
-        display.flush(&mut delay).expect("could not flush display");
+        let mut display = Display::new(ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false));
+        display.test();
 
         hprintln!("sdcard").unwrap();
 
@@ -199,66 +157,25 @@ const APP: () = {
             &mut rcc.apb1,
         );
 
-        let mut sd_cont = embedded_sdmmc::Controller::new(
+        let mut sdcard = SDCard::new(embedded_sdmmc::Controller::new(
             embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
-            sdcard::DummyTimeSource {},
-        );
-
-        hprintln!("Init SD card...").unwrap();
-
-        let mut sdres = sd_cont.device().init();
-        while sdres.is_err() {
-            hprintln!("{:?}!", sdres).unwrap();
-            sdres = sd_cont.device().init();
-        }
-
-        match sdres {
-            Ok(_) => {
-                hprintln!("SD init OK!").unwrap();
-                match sd_cont.device().card_size_bytes() {
-                    Ok(size) => hprintln!("Card size {}", size).unwrap(),
-                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
-                }
-                match sd_cont.get_volume(embedded_sdmmc::VolumeIdx(0)) {
-                    Ok(mut v) => {
-                        hprintln!("Volume 0 {:?}", v).unwrap();
-                        let r = sd_cont.open_root_dir(&v).unwrap();
-                        let mut bootf = sd_cont
-                            .open_file_in_dir(
-                                &mut v,
-                                &r,
-                                "BOOT",
-                                embedded_sdmmc::filesystem::Mode::ReadOnly,
-                            )
-                            .unwrap();
-
-                        let mut buf: [u8; 64] = [0; 64];
-                        sd_cont.read(&v, &mut bootf, &mut buf).unwrap();
-
-                        hprintln!("boot buf: {:?}", buf).unwrap();
-
-                        for c in &buf[0..64] {
-                            uart_serial.write(*c).map_or((), |_| ())
-                        }
-                        uart_serial.flush().map_or((), |_| ());
-                    }
-                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
-                }
-            }
-            Err(e) => hprintln!("{:?}!", e).unwrap(),
-        }
+            DummyTimeSource {},
+        ));
+        sdcard.init();
 
         hprintln!("init::LateResources").unwrap();
         init::LateResources {
             led,
             usb_serial,
             uart_serial,
+            display,
+            sdcard,
         }
     }
 
     #[idle(resources = [usb_serial])]
-    fn idle(mut cx: idle::Context) -> ! {
-        let foo = "foo\n";
+    fn idle(_cx: idle::Context) -> ! {
+        //let foo = "foo\n";
 
         loop {
             asm::delay(3 * SYS_FREQ.0);
