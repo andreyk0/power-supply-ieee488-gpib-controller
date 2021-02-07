@@ -21,7 +21,7 @@ use heapless::consts::*;
 use heapless::Vec;
 
 use power_supply_ieee488_gpib_controller::{
-    consts::*, display::*, sdcard::*, time::*, types::*, usb_serial,
+    consts::*, display::*, sdcard::*, time::*, types::*, uart_serial::*, usb_serial::*,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -31,7 +31,7 @@ const APP: () = {
     struct Resources {
         led: LedPin,
         usb_serial: UsbSerialDevice,
-        uart_serial: UartSerialDevice,
+        uart_serial: UartSerial,
         display: Display,
         sdcard: SDCard,
     }
@@ -103,23 +103,23 @@ const APP: () = {
 
         hprintln!("usb_serial").unwrap();
 
-        let usb_serial = usb_serial::UsbSerial::new(usb_bus);
+        let usb_serial = UsbSerial::new(usb_bus);
 
         hprintln!("uart_serial").unwrap();
 
         let pin_tx = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
         let pin_rx = gpioa.pa3;
 
-        let mut uart_serial = serial::Serial::usart2(
+        let mut uart_serial = UartSerial::new(serial::Serial::usart2(
             device.USART2,
             (pin_tx, pin_rx),
             &mut afio.mapr,
             serial::Config::default().baudrate(115_200.bps()),
             clocks,
             &mut rcc.apb1,
-        );
+        ));
 
-        uart_serial.listen(serial::Event::Rxne);
+        uart_serial.init();
 
         hprintln!("display").unwrap();
 
@@ -222,10 +222,8 @@ const APP: () = {
         let mut buf: [u8; 16] = [0; 16];
         match cx.resources.usb_serial.read(&mut buf) {
             Ok(s) if s > 0 => {
-                for c in &buf[0..s] {
-                    cx.resources.uart_serial.write(*c).map_or((), |_| ())
-                }
-                cx.resources.uart_serial.flush().map_or((), |_| ());
+                cx.resources.uart_serial.try_write_buf(&buf);
+                cx.resources.uart_serial.try_flush()
             }
             _ => {}
         }
@@ -236,13 +234,7 @@ const APP: () = {
         priority = 2)]
     fn uart_poll(cx: uart_poll::Context) {
         let mut buf: Vec<u8, U16> = Vec::new();
-
-        while cx
-            .resources
-            .uart_serial
-            .read()
-            .map_or(false, |c| buf.push(c).map_or(false, |_| true))
-        { /**/ }
+        cx.resources.uart_serial.try_fill_buf(&mut buf);
 
         // Ignore USB errors (may not be connected)
         cx.resources.usb_serial.write(&buf).map_or((), |_| ());
