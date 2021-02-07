@@ -2,11 +2,11 @@ use st7920::ST7920;
 use stm32f1xx_hal::gpio::*;
 use stm32f1xx_hal::{gpio, pac, serial, spi, usb};
 
-use crate::{time::*, usbserial};
+use crate::{time::*, usb_serial};
 
 pub type LedPin = gpioc::PC13<Output<PushPull>>;
 
-pub type UsbSerialDevice = usbserial::UsbSerial<'static, usb::UsbBus<usb::Peripheral>>;
+pub type UsbSerialDevice = usb_serial::UsbSerial<'static, usb::UsbBus<usb::Peripheral>>;
 
 pub type UartSerialDevice = serial::Serial<
     pac::USART2,

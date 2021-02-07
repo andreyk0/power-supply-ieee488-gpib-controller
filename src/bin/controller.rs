@@ -21,7 +21,7 @@ use heapless::consts::*;
 use heapless::Vec;
 
 use power_supply_ieee488_gpib_controller::{
-    consts::*, display::*, sdcard::*, time::*, types::*, usbserial,
+    consts::*, display::*, sdcard::*, time::*, types::*, usb_serial,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -103,7 +103,7 @@ const APP: () = {
 
         hprintln!("usb_serial").unwrap();
 
-        let usb_serial = usbserial::UsbSerial::new(usb_bus);
+        let usb_serial = usb_serial::UsbSerial::new(usb_bus);
 
         hprintln!("uart_serial").unwrap();
 
