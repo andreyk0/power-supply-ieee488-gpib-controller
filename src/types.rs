@@ -6,7 +6,7 @@ use crate::{time::*, usb_serial};
 
 pub type LedPin = gpioc::PC13<Output<PushPull>>;
 
-pub type UsbSerialDevice = usb_serial::UsbSerial<'static, usb::UsbBus<usb::Peripheral>>;
+pub type UsbSerial = usb_serial::UsbSerialDevice<'static, usb::UsbBus<usb::Peripheral>>;
 
 pub type UartSerialDevice = serial::Serial<
     pac::USART2,

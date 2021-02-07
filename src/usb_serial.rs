@@ -1,7 +1,7 @@
 use usb_device::{bus, prelude::*};
 use usbd_serial::{DefaultBufferStore, Result, SerialPort};
 
-pub struct UsbSerial<'a, B>
+pub struct UsbSerialDevice<'a, B>
 where
     B: bus::UsbBus,
 {
@@ -9,12 +9,12 @@ where
     usb_device: UsbDevice<'a, B>,
 }
 
-impl<B> UsbSerial<'_, B>
+impl<B> UsbSerialDevice<'_, B>
 where
     B: bus::UsbBus,
 {
     /// New usb serial
-    pub fn new<'a>(usb_bus: &'a bus::UsbBusAllocator<B>) -> UsbSerial<'a, B> {
+    pub fn new<'a>(usb_bus: &'a bus::UsbBusAllocator<B>) -> UsbSerialDevice<'a, B> {
         // this has to go before UsbDeviceBuilder, it mutably borrows from
         // refcells but doesn't exit scope and anything else trying to do
         // the same panics in refcell's borrow mut call
@@ -27,7 +27,7 @@ where
             .device_class(usbd_serial::USB_CLASS_CDC)
             .build();
 
-        UsbSerial {
+        UsbSerialDevice {
             serial_port,
             usb_device,
         }

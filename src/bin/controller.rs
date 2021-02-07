@@ -21,7 +21,7 @@ use heapless::consts::*;
 use heapless::Vec;
 
 use power_supply_ieee488_gpib_controller::{
-    consts::*, display::*, sdcard::*, time::*, types::*, uart_serial::*, usb_serial::*,
+    consts::*, display::*, sdcard::*, time::*, types::*, uart_serial::*,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -30,7 +30,7 @@ use power_supply_ieee488_gpib_controller::{
 const APP: () = {
     struct Resources {
         led: LedPin,
-        usb_serial: UsbSerialDevice,
+        usb_serial: UsbSerial,
         uart_serial: UartSerial,
         display: Display,
         sdcard: SDCard,
