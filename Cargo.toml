@@ -5,6 +5,25 @@ readme = "README.md"
 name = "power_supply_ieee488_gpib_controller"
 version = "0.1.0"
 
+[features]
+# enable debug/info actions (e.g. print to gdb host), larger size
+default = [
+  #"sdc_info",
+  #"sdc_debug",
+  #"bin_info",
+  #"render_debug",
+]
+# SDC host info messages
+sdc_info = []
+# SDC host debug messages
+sdc_debug = []
+
+# main binary info messages
+bin_info = []
+
+# introduce rendering delay for debugging
+render_debug = []
+
 [dependencies]
 # can print panic messages but larger
 #panic-semihosting = "0.5.3"
@@ -28,7 +47,6 @@ embedded-sdmmc = { git = "https://github.com/andreyk0/embedded-sdmmc-rs", branch
 
 heapless = "0.6.0"
 
-
 [dependencies.stm32f1]
 version = "0.12.1"
 features = ["stm32f103", "rt"]
@@ -48,7 +66,7 @@ debug = true
 
 # link with link time optimization (lto).
 # NOTE: setting this to true upsets GDB, there's a bug somewhere
-lto = true
+lto = false
 
 [profile.release]
 

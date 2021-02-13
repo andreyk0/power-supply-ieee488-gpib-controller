@@ -1,40 +1,106 @@
+use core::convert::Infallible;
+
+use core::fmt::Write;
+
+use embedded_hal::blocking::delay::DelayUs;
+
 use embedded_graphics::{
-    fonts::{Font6x8, Text},
-    pixelcolor::BinaryColor,
-    prelude::*,
-    primitives::Circle,
-    style::{PrimitiveStyle, TextStyle},
+    egtext, fonts::Font6x6, fonts::Font6x8, pixelcolor::BinaryColor, prelude::*, primitives::*,
+    style::*, text_style,
 };
 
-use crate::{delay::*, types::*};
+use stm32f1xx_hal::spi;
+
+use heapless::{consts::*, String};
+
+use crate::{delay::*, model::*, prelude::*};
+
+// 0 to n-1 based
+pub const WIDTH: i32 = 127;
+pub const HEIGHT: i32 = 63;
 
 pub struct Display {
     device: DisplayDevice,
 }
 
 impl Display {
-    pub fn new(mut device: DisplayDevice) -> Display {
+    pub fn new(mut device: DisplayDevice) -> Result<Self, AppError> {
         let mut delay = AsmDelay {};
-
-        device.init(&mut delay).unwrap();
-        device.clear(&mut delay).unwrap();
-
-        Display { device }
+        device.init(&mut delay)?;
+        device.clear(&mut delay)?;
+        Ok(Display { device })
     }
 
-    pub fn test(self: &mut Self) {
+    pub fn clear(self: &mut Self) -> Result<(), AppError> {
+        Rectangle::new(Point::zero(), Point::new(WIDTH, HEIGHT))
+            .into_styled(
+                PrimitiveStyleBuilder::new()
+                    .stroke_width(1)
+                    .stroke_color(BinaryColor::On)
+                    .fill_color(BinaryColor::Off)
+                    .build(),
+            )
+            .draw(&mut self.device)?;
+
+        Ok(())
+    }
+
+    pub fn flush(self: &mut Self) -> Result<(), AppError> {
         let mut delay = AsmDelay {};
+        self.device.flush(&mut delay)?;
+        Ok(())
+    }
 
-        let c = Circle::new(Point::new(20, 20), 8)
-            .into_styled(PrimitiveStyle::with_fill(BinaryColor::On));
-        let t = Text::new("Moohahaha!", Point::new(40, 16))
-            .into_styled(TextStyle::new(Font6x8, BinaryColor::On));
+    pub fn render(self: &mut Self, ps: &PS) -> Result<(), AppError> {
+        self.clear()?;
 
-        c.draw(&mut self.device).unwrap();
-        t.draw(&mut self.device).unwrap();
+        match &ps.error {
+            Some(e) => self.render_error(&e)?,
+            None => self.render_ui(&ps.ui)?,
+        }
 
-        self.device
-            .flush(&mut delay)
-            .expect("could not flush display");
+        self.flush()?;
+
+        ifcfg!("render_debug", {
+            let mut delay = AsmDelay {};
+            delay.delay_us(1000000);
+            Ok::<(), ()>(())
+        });
+        Ok(())
+    }
+
+    fn render_error(self: &mut Self, e: &AppError) -> Result<(), AppError> {
+        let mut s: String<U32> = String::new();
+        write!(&mut s, "{:?}", e)?;
+
+        egtext!(
+            text = &s,
+            top_left = Point::zero(),
+            style = text_style!(font = Font6x8, text_color = BinaryColor::On,)
+        )
+        .draw(&mut self.device)?;
+
+        Ok(())
+    }
+
+    fn render_ui(self: &mut Self, ps: &UI) -> Result<(), AppError> {
+        let UI::UILoading(s) = ps;
+        let mut buf: String<U64> = String::new();
+        write!(&mut buf, "Loading {} ...", s)?;
+
+        egtext!(
+            text = &buf,
+            top_left = Point::new(2, HEIGHT / 2 - 3),
+            style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
+        )
+        .draw(&mut self.device)?;
+
+        Ok(())
+    }
+}
+
+impl From<st7920::Error<spi::Error, Infallible>> for AppError {
+    fn from(_: st7920::Error<spi::Error, Infallible>) -> Self {
+        AppError::DisplayError("SPI")
     }
 }

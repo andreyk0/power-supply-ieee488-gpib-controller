@@ -2,6 +2,8 @@ use cortex_m_semihosting::*;
 
 use crate::types::*;
 
+use crate::*;
+
 pub struct SDCard {
     controller: SDCardController,
 }
@@ -14,20 +16,22 @@ impl SDCard {
     pub fn init(&mut self) {
         let mut sdres = self.controller.device().init();
         while sdres.is_err() {
-            hprintln!("{:?}!", sdres).unwrap();
+            ifcfg!("sdc_debug", hprintln!("{:?}!", sdres));
             sdres = self.controller.device().init();
         }
 
         match sdres {
             Ok(_) => {
-                hprintln!("SD init OK!").unwrap();
+                ifcfg!("sdc_info", hprintln!("SD init OK!"));
+
                 match self.controller.device().card_size_bytes() {
-                    Ok(size) => hprintln!("Card size {}", size).unwrap(),
-                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
+                    Ok(size) => ifcfg!("sdc_info", hprintln!("Card size {}", size)),
+                    Err(e) => ifcfg!("sdc_info", hprintln!("Err: {:?}", e)),
                 }
                 match self.controller.get_volume(embedded_sdmmc::VolumeIdx(0)) {
                     Ok(mut v) => {
-                        hprintln!("Volume 0 {:?}", v).unwrap();
+                        ifcfg!("sdc_debug", hprintln!("Volume 0 {:?}", v));
+
                         let r = self.controller.open_root_dir(&v).unwrap();
                         let mut bootf = self
                             .controller
@@ -42,17 +46,18 @@ impl SDCard {
                         let mut buf: [u8; 64] = [0; 64];
                         self.controller.read(&v, &mut bootf, &mut buf).unwrap();
 
-                        hprintln!("boot buf: {:?}", buf).unwrap();
+                        ifcfg!("debug_sdc", hprint!("boot buf: {:?}", buf))
 
+                        //if cfg!($cc) { }
                         //for c in &buf[0..64] {
                         //    uart_serial.write(*c).map_or((), |_| ())
                         //}
                         //uart_serial.flush().map_or((), |_| ());
                     }
-                    Err(e) => hprintln!("Err: {:?}", e).unwrap(),
+                    Err(e) => ifcfg!("sdc_info", hprintln!("Err: {:?}", e)),
                 }
             }
-            Err(e) => hprintln!("{:?}!", e).unwrap(),
+            Err(e) => ifcfg!("sdc_info", hprintln!("{:?}!", e)),
         }
     }
 }

@@ -17,11 +17,11 @@ use usb_device::bus;
 
 use st7920::ST7920;
 
-use heapless::consts::*;
-use heapless::Vec;
+use heapless::{consts::*, Vec};
 
+use power_supply_ieee488_gpib_controller::*;
 use power_supply_ieee488_gpib_controller::{
-    consts::*, display::*, sdcard::*, time::*, types::*, uart_serial::*,
+    display::*, model::*, prelude::*, sdcard::*, time::*, uart_serial::*,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -53,17 +53,40 @@ const APP: () = {
             .pclk1(36.mhz())
             .freeze(&mut flash.acr);
 
-        hprintln!("clocks").unwrap();
+        ifcfg!("bin_info", hprintln!("clocks"));
 
         assert!(clocks.usbclk_valid());
 
-        hprintln!("gpio").unwrap();
+        ifcfg!("bin_info", hprintln!("gpio"));
 
         let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
         let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
         let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
 
-        hprintln!("blink").unwrap();
+        let mut ps = PS::new();
+
+        ifcfg!("bin_info", hprintln!("display"));
+
+        let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
+        let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
+        let lcd_reset = gpioa.pa6.into_push_pull_output(&mut gpioa.crl);
+        let lcd_cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+
+        let lcd_spi = spi::Spi::spi1(
+            device.SPI1,
+            (lcd_sck, spi::NoMiso, lcd_mosi),
+            &mut afio.mapr,
+            espi::MODE_0,
+            time::Hertz(600_000),
+            clocks,
+            &mut rcc.apb2,
+        );
+
+        let mut display =
+            Display::new(ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false)).unwrap();
+
+        ps.act(Act::UILoading("blink"));
+        display.render(&ps).unwrap();
 
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
@@ -77,7 +100,8 @@ const APP: () = {
             .blink(cx.start + Duration::from_cycles(SYS_FREQ.0 / 2))
             .unwrap();
 
-        hprintln!("usbp").unwrap();
+        ps.act(Act::UILoading("usbp"));
+        display.render(&ps).unwrap();
 
         // BluePill board has a pull-up resistor on the D+ line.
         // Pull the D+ pin down to send a RESET condition to the USB bus.
@@ -96,16 +120,22 @@ const APP: () = {
             pin_dp: usb_dp,
         };
 
-        hprintln!("usb_bus").unwrap();
+        ps.act(Act::UILoading("usb_bus"));
+        display.render(&ps).unwrap();
+        ifcfg!("bin_info", hprintln!("usb_bus"));
 
         *USB_BUS = Some(usb::UsbBus::new(usbp));
         let usb_bus = USB_BUS.as_ref().unwrap();
 
-        hprintln!("usb_serial").unwrap();
+        ps.act(Act::UILoading("usb_serial"));
+        display.render(&ps).unwrap();
+        ifcfg!("bin_info", hprintln!("usb_serial"));
 
         let usb_serial = UsbSerial::new(usb_bus);
 
-        hprintln!("uart_serial").unwrap();
+        ps.act(Act::UILoading("uart_serial"));
+        display.render(&ps).unwrap();
+        ifcfg!("bin_info", hprintln!("uart_serial"));
 
         let pin_tx = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
         let pin_rx = gpioa.pa3;
@@ -121,27 +151,9 @@ const APP: () = {
 
         uart_serial.init();
 
-        hprintln!("display").unwrap();
-
-        let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
-        let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
-        let lcd_reset = gpioa.pa6.into_push_pull_output(&mut gpioa.crl);
-        let lcd_cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
-
-        let lcd_spi = spi::Spi::spi1(
-            device.SPI1,
-            (lcd_sck, spi::NoMiso, lcd_mosi),
-            &mut afio.mapr,
-            espi::MODE_0,
-            time::Hertz(600_000),
-            clocks,
-            &mut rcc.apb2,
-        );
-
-        let mut display = Display::new(ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false));
-        display.test();
-
-        hprintln!("sdcard").unwrap();
+        ps.act(Act::UILoading("sd_card"));
+        display.render(&ps).unwrap();
+        ifcfg!("bin_info", hprintln!("sd_card"));
 
         let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
         let sd_miso = gpiob.pb14;
@@ -157,13 +169,15 @@ const APP: () = {
             &mut rcc.apb1,
         );
 
-        let mut sdcard = SDCard::new(embedded_sdmmc::Controller::new(
+        let sdcard = SDCard::new(embedded_sdmmc::Controller::new(
             embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
             DummyTimeSource {},
         ));
-        sdcard.init();
 
-        hprintln!("init::LateResources").unwrap();
+        ps.act(Act::UILoading("resources"));
+        display.render(&ps).unwrap();
+        ifcfg!("bin_info", hprintln!("resources"));
+
         init::LateResources {
             led,
             usb_serial,
@@ -173,12 +187,13 @@ const APP: () = {
         }
     }
 
-    #[idle(resources = [usb_serial])]
-    fn idle(_cx: idle::Context) -> ! {
-        //let foo = "foo\n";
+    #[idle(resources = [sdcard, usb_serial])]
+    fn idle(mut cx: idle::Context) -> ! {
+        cx.resources.sdcard.init();
 
         loop {
-            asm::delay(3 * SYS_FREQ.0);
+            cx.resources.usb_serial.lock(|s| s.poll());
+            //asm::delay(3 * SYS_FREQ.0);
 
             //            let mut data: [u8; 8] = [0; 8];
 
@@ -192,8 +207,6 @@ const APP: () = {
              */
 
             //cx.resources.usb_serial.lock(|s| s.write(foo.as_bytes()));
-
-            //hprintln!("R: {:?}", data);
         }
     }
 
