@@ -7,7 +7,9 @@ use core::convert::Infallible;
 pub enum AppError {
     Duh,
     FmtError,
-    InitError(&'static str),
+    SDError,
+    UsbSerialError,
+    UartSerialError,
     DisplayError(&'static str),
 }
 

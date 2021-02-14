@@ -1,5 +1,9 @@
+use cortex_m_semihosting::*;
+
 use usb_device::{bus, prelude::*};
-use usbd_serial::{DefaultBufferStore, Result, SerialPort};
+use usbd_serial::{DefaultBufferStore, SerialPort};
+
+use crate::prelude::*;
 
 pub struct UsbSerialDevice<'a, B>
 where
@@ -44,25 +48,37 @@ where
 
     /// Serial read
     #[inline]
-    pub fn read(&mut self, data: &mut [u8]) -> Result<usize> {
+    pub fn read(&mut self, data: &mut [u8]) -> Result<usize, AppError> {
         self.poll();
 
-        if self.serial_port.dtr() {
-            self.serial_port.read(data)
+        let size = if self.serial_port.dtr() {
+            self.serial_port.read(data)?
         } else {
-            Ok(0)
-        }
+            0
+        };
+
+        ifcfg!("usb_debug", hprintln!("USB read {}", size));
+        Ok(size)
     }
 
     /// Serial write
     #[inline]
-    pub fn write(&mut self, data: &[u8]) -> Result<usize> {
+    pub fn write(&mut self, data: &[u8]) -> Result<usize, AppError> {
         self.poll();
 
-        if self.serial_port.dtr() {
-            self.serial_port.write(data)
+        let size = if self.serial_port.dtr() {
+            self.serial_port.write(data)?
         } else {
-            Ok(0)
-        }
+            0
+        };
+
+        ifcfg!("usb_debug", hprintln!("USB write {}", size));
+        Ok(size)
+    }
+}
+
+impl From<UsbError> for AppError {
+    fn from(_: UsbError) -> Self {
+        AppError::UsbSerialError
     }
 }

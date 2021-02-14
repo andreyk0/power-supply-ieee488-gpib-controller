@@ -29,6 +29,7 @@ use power_supply_ieee488_gpib_controller::{
             monotonic = rtic::cyccnt::CYCCNT)]
 const APP: () = {
     struct Resources {
+        ps: PS,
         led: LedPin,
         usb_serial: UsbSerial,
         uart_serial: UartSerial,
@@ -179,6 +180,7 @@ const APP: () = {
         ifcfg!("bin_info", hprintln!("resources"));
 
         init::LateResources {
+            ps,
             led,
             usb_serial,
             uart_serial,
@@ -187,26 +189,30 @@ const APP: () = {
         }
     }
 
-    #[idle(resources = [sdcard, usb_serial])]
+    #[idle(resources = [ps, display, sdcard, usb_serial, uart_serial])]
     fn idle(mut cx: idle::Context) -> ! {
-        cx.resources.sdcard.init();
+        cx.resources.usb_serial.lock(|s| s.poll());
+
+        let ps = cx.resources.ps;
+        let display = cx.resources.display;
+
+        ps.act(Act::UILoading("BOOT"));
+        display.render(ps).unwrap();
+
+        let sdc = cx.resources.sdcard;
+
+        cx.resources
+            .uart_serial
+            .lock(|us| {
+                sdc.send_file("BOOT", |buf| us.write_buf(buf))
+                    .and_then(|_| us.flush())
+            })
+            .map_err(|e| ps.act(Act::ShowError(e)))
+            .unwrap();
 
         loop {
+            display.render(ps).unwrap();
             cx.resources.usb_serial.lock(|s| s.poll());
-            //asm::delay(3 * SYS_FREQ.0);
-
-            //            let mut data: [u8; 8] = [0; 8];
-
-            /*
-            cx.resources.usb_serial.lock(|s| match s.read(&mut data) {
-                Ok(_) => {
-                    //s.write("foo".as_bytes()).unwrap();
-                }
-                Err(_) => {}
-            });
-             */
-
-            //cx.resources.usb_serial.lock(|s| s.write(foo.as_bytes()));
         }
     }
 
@@ -235,8 +241,8 @@ const APP: () = {
         let mut buf: [u8; 16] = [0; 16];
         match cx.resources.usb_serial.read(&mut buf) {
             Ok(s) if s > 0 => {
-                cx.resources.uart_serial.try_write_buf(&buf);
-                cx.resources.uart_serial.try_flush()
+                cx.resources.uart_serial.write_buf(&buf).unwrap();
+                cx.resources.uart_serial.flush().unwrap()
             }
             _ => {}
         }
@@ -247,7 +253,7 @@ const APP: () = {
         priority = 2)]
     fn uart_poll(cx: uart_poll::Context) {
         let mut buf: Vec<u8, U16> = Vec::new();
-        cx.resources.uart_serial.try_fill_buf(&mut buf);
+        cx.resources.uart_serial.fill_buf(&mut buf).unwrap();
 
         // Ignore USB errors (may not be connected)
         cx.resources.usb_serial.write(&buf).map_or((), |_| ());

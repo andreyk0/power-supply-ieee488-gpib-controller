@@ -1,7 +1,9 @@
+use core::ops::FnMut;
+
 use cortex_m_semihosting::*;
+use embedded_sdmmc::{filesystem::Mode, SdMmcError, Volume, VolumeIdx};
 
-use crate::types::*;
-
+use crate::prelude::*;
 use crate::*;
 
 pub struct SDCard {
@@ -13,51 +15,58 @@ impl SDCard {
         SDCard { controller }
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self) -> Result<Volume, AppError> {
         let mut sdres = self.controller.device().init();
-        while sdres.is_err() {
+        let mut num_tries = 100;
+        while num_tries > 0 && sdres.is_err() {
+            num_tries -= 1;
             ifcfg!("sdc_debug", hprintln!("{:?}!", sdres));
             sdres = self.controller.device().init();
         }
 
-        match sdres {
-            Ok(_) => {
-                ifcfg!("sdc_info", hprintln!("SD init OK!"));
+        sdres?;
 
-                match self.controller.device().card_size_bytes() {
-                    Ok(size) => ifcfg!("sdc_info", hprintln!("Card size {}", size)),
-                    Err(e) => ifcfg!("sdc_info", hprintln!("Err: {:?}", e)),
-                }
-                match self.controller.get_volume(embedded_sdmmc::VolumeIdx(0)) {
-                    Ok(mut v) => {
-                        ifcfg!("sdc_debug", hprintln!("Volume 0 {:?}", v));
+        ifcfg!("sdc_info", hprintln!("SD init OK!"));
 
-                        let r = self.controller.open_root_dir(&v).unwrap();
-                        let mut bootf = self
-                            .controller
-                            .open_file_in_dir(
-                                &mut v,
-                                &r,
-                                "BOOT",
-                                embedded_sdmmc::filesystem::Mode::ReadOnly,
-                            )
-                            .unwrap();
+        let sd_size = self.controller.device().card_size_bytes()?;
+        ifcfg!("sdc_info", hprintln!("Card size {}", sd_size));
 
-                        let mut buf: [u8; 64] = [0; 64];
-                        self.controller.read(&v, &mut bootf, &mut buf).unwrap();
+        let vol = self.controller.get_volume(VolumeIdx(0))?;
+        ifcfg!("sdc_debug", hprintln!("Volume 0 {:?}", vol));
 
-                        ifcfg!("debug_sdc", hprint!("boot buf: {:?}", buf))
+        Ok(vol)
+    }
 
-                        //if cfg!($cc) { }
-                        //for c in &buf[0..64] {
-                        //    uart_serial.write(*c).map_or((), |_| ())
-                        //}
-                        //uart_serial.flush().map_or((), |_| ());
-                    }
-                    Err(e) => ifcfg!("sdc_info", hprintln!("Err: {:?}", e)),
-                }
-            }
-            Err(e) => ifcfg!("sdc_info", hprintln!("{:?}!", e)),
+    pub fn send_file<F>(&mut self, fname: &str, mut func: F) -> Result<(), AppError>
+    where
+        F: FnMut(&[u8]) -> Result<(), AppError>,
+    {
+        let mut vol = self.init()?;
+        let r = self.controller.open_root_dir(&vol)?;
+        let mut f = self
+            .controller
+            .open_file_in_dir(&mut vol, &r, fname, Mode::ReadOnly)?;
+
+        let mut buf: [u8; 128] = [0; 128];
+        let mut nbytes = self.controller.read(&vol, &mut f, &mut buf)?;
+        while nbytes > 0 {
+            ifcfg!("sdc_debug", hprint!("sending: {}", nbytes));
+            func(&buf[0..nbytes])?;
+            nbytes = self.controller.read(&vol, &mut f, &mut buf)?;
         }
+
+        Ok(())
+    }
+}
+
+impl From<SdMmcError> for AppError {
+    fn from(_: SdMmcError) -> Self {
+        AppError::SDError
+    }
+}
+
+impl From<embedded_sdmmc::Error<SdMmcError>> for AppError {
+    fn from(_: embedded_sdmmc::Error<SdMmcError>) -> Self {
+        AppError::SDError
     }
 }

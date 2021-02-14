@@ -1,8 +1,12 @@
+use cortex_m_semihosting::*;
+
+use nb;
+
 use stm32f1xx_hal::{prelude::*, serial::*};
 
 use heapless::{ArrayLength, Vec};
 
-use crate::types::*;
+use crate::prelude::*;
 
 pub struct UartSerial {
     device: UartSerialDevice,
@@ -14,27 +18,36 @@ impl UartSerial {
     }
 
     pub fn init(&mut self) {
-        self.device.listen(Event::Rxne);
+        self.device.listen(Event::Rxne)
     }
 
-    pub fn try_flush(&mut self) {
-        self.device.flush().map_or((), |_| ())
+    pub fn flush(&mut self) -> Result<(), AppError> {
+        ifcfg!("uart_debug", hprintln!("UART flush"));
+        nb::block!(self.device.flush())?;
+        Ok(())
     }
 
-    pub fn try_write_buf(&mut self, buf: &[u8]) {
+    pub fn write_buf(&mut self, buf: &[u8]) -> Result<(), AppError> {
         for c in buf {
-            self.device.write(*c).map_or((), |_| ())
+            ifcfg!("uart_debug", hprintln!("UART write {}", c));
+            nb::block!(self.device.write(*c))?;
         }
+        Ok(())
     }
 
-    pub fn try_fill_buf<S>(&mut self, buf: &mut Vec<u8, S>)
+    pub fn fill_buf<S>(&mut self, buf: &mut Vec<u8, S>) -> Result<(), AppError>
     where
         S: ArrayLength<u8>,
     {
-        while self
-            .device
-            .read()
-            .map_or(false, |c| buf.push(c).map_or(false, |_| true))
-        { /**/ }
+        while let (Ok(b), true) = (self.device.read(), buf.len() < buf.capacity()) {
+            buf.push(b).unwrap();
+        }
+        Ok(())
+    }
+}
+
+impl From<stm32f1xx_hal::serial::Error> for AppError {
+    fn from(_: stm32f1xx_hal::serial::Error) -> Self {
+        AppError::UartSerialError
     }
 }

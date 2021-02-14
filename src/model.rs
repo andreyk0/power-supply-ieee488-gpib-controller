@@ -30,7 +30,8 @@ impl PS {
 
     pub fn act(&mut self, a: Act) {
         match a {
-            Act::ShowError(e) => self.error = Some(e),
+            Act::ShowError(e) if self.error.is_none() => self.error = Some(e),
+            Act::ShowError(_) => (),
             Act::ClearError => self.error = None,
             Act::UILoading(s) => self.ui = UI::UILoading(s),
         }
