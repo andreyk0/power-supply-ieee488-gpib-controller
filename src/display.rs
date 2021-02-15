@@ -5,8 +5,8 @@ use core::fmt::Write;
 use embedded_hal::blocking::delay::DelayUs;
 
 use embedded_graphics::{
-    egtext, fonts::Font6x6, fonts::Font6x8, pixelcolor::BinaryColor, prelude::*, primitives::*,
-    style::*, text_style,
+    egtext, fonts::Font6x6, pixelcolor::BinaryColor, prelude::*, primitives::*, style::*,
+    text_style,
 };
 
 use stm32f1xx_hal::spi;
@@ -75,8 +75,8 @@ impl Display {
 
         egtext!(
             text = &s,
-            top_left = Point::zero(),
-            style = text_style!(font = Font6x8, text_color = BinaryColor::On,)
+            top_left = Point::new(2, HEIGHT / 2 - 3),
+            style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
         )
         .draw(&mut self.device)?;
 

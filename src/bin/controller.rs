@@ -208,7 +208,7 @@ const APP: () = {
                     .and_then(|_| us.flush())
             })
             .map_err(|e| ps.act(Act::ShowError(e)))
-            .unwrap();
+            .ok();
 
         loop {
             display.render(ps).unwrap();

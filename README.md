@@ -50,6 +50,6 @@ Signal levels: TTL 3.3V (works with 5V FTDI cable too).
 Testing MCU serial - to - UART via USB serial
 
 ``` bash
-picocom --baud 115200 --imap crcrlf --echo /dev/ttyUSB0
+picocom --baud 115200 --imap lfcrlf --echo /dev/ttyUSB0
 picocom --baud 115200 --imap crcrlf --echo /dev/ttyACM0
 ```
