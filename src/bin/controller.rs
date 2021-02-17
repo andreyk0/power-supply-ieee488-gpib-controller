@@ -145,7 +145,7 @@ const APP: () = {
             device.USART2,
             (pin_tx, pin_rx),
             &mut afio.mapr,
-            serial::Config::default().baudrate(115_200.bps()),
+            serial::Config::default(),
             clocks,
             &mut rcc.apb1,
         ));
@@ -210,6 +210,9 @@ const APP: () = {
             .map_err(|e| ps.act(Act::ShowError(e)))
             .ok();
 
+        ps.act(Act::UILoading("Running ..."));
+        display.render(ps).unwrap();
+
         loop {
             display.render(ps).unwrap();
             cx.resources.usb_serial.lock(|s| s.poll());
@@ -241,7 +244,7 @@ const APP: () = {
         let mut buf: [u8; 16] = [0; 16];
         match cx.resources.usb_serial.read(&mut buf) {
             Ok(s) if s > 0 => {
-                cx.resources.uart_serial.write_buf(&buf).unwrap();
+                cx.resources.uart_serial.write_buf(&buf[0..s]).unwrap();
                 cx.resources.uart_serial.flush().unwrap()
             }
             _ => {}
