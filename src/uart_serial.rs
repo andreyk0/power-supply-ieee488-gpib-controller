@@ -40,7 +40,7 @@ impl UartSerial {
         S: ArrayLength<u8>,
     {
         while let (Ok(b), true) = (self.device.read(), buf.len() < buf.capacity()) {
-            buf.push(b).unwrap();
+            buf.push(b).map_err(|_| AppError::Duh)?
         }
         Ok(())
     }

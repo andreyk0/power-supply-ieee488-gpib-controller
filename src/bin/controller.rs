@@ -21,7 +21,7 @@ use heapless::{consts::*, Vec};
 
 use power_supply_ieee488_gpib_controller::*;
 use power_supply_ieee488_gpib_controller::{
-    display::*, model::*, prelude::*, sdcard::*, time::*, uart_serial::*,
+    display::*, line::*, model::*, prelude::*, sdcard::*, time::*, uart_serial::*,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -35,6 +35,9 @@ const APP: () = {
         uart_serial: UartSerial,
         display: Display,
         sdcard: SDCard,
+
+        uart_rx_buf: Vec<u8, U32>,
+        usb_rx_buf: Vec<u8, U32>,
     }
 
     #[init(schedule = [blink])]
@@ -86,7 +89,7 @@ const APP: () = {
         let mut display =
             Display::new(ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false)).unwrap();
 
-        ps.act(Act::UILoading("blink"));
+        ps.set_ui_loading("blink");
         display.render(&ps).unwrap();
 
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
@@ -101,7 +104,7 @@ const APP: () = {
             .blink(cx.start + Duration::from_cycles(SYS_FREQ.0 / 2))
             .unwrap();
 
-        ps.act(Act::UILoading("usbp"));
+        ps.set_ui_loading("usbp");
         display.render(&ps).unwrap();
 
         // BluePill board has a pull-up resistor on the D+ line.
@@ -121,20 +124,20 @@ const APP: () = {
             pin_dp: usb_dp,
         };
 
-        ps.act(Act::UILoading("usb_bus"));
+        ps.set_ui_loading("usb_bus");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("usb_bus"));
 
         *USB_BUS = Some(usb::UsbBus::new(usbp));
         let usb_bus = USB_BUS.as_ref().unwrap();
 
-        ps.act(Act::UILoading("usb_serial"));
+        ps.set_ui_loading("usb_serial");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("usb_serial"));
 
         let usb_serial = UsbSerial::new(usb_bus);
 
-        ps.act(Act::UILoading("uart_serial"));
+        ps.set_ui_loading("uart_serial");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("uart_serial"));
 
@@ -152,7 +155,7 @@ const APP: () = {
 
         uart_serial.init();
 
-        ps.act(Act::UILoading("sd_card"));
+        ps.set_ui_loading("sd_card");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("sd_card"));
 
@@ -175,9 +178,12 @@ const APP: () = {
             DummyTimeSource {},
         ));
 
-        ps.act(Act::UILoading("resources"));
+        ps.set_ui_loading("resources");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("resources"));
+
+        let uart_rx_buf = Vec::new();
+        let usb_rx_buf = Vec::new();
 
         init::LateResources {
             ps,
@@ -186,36 +192,106 @@ const APP: () = {
             uart_serial,
             display,
             sdcard,
+            uart_rx_buf,
+            usb_rx_buf,
         }
     }
 
-    #[idle(resources = [ps, display, sdcard, usb_serial, uart_serial])]
-    fn idle(mut cx: idle::Context) -> ! {
-        cx.resources.usb_serial.lock(|s| s.poll());
+    #[idle(resources = [ps, display, sdcard, usb_serial, uart_serial, usb_rx_buf, uart_rx_buf])]
+    fn idle(cx: idle::Context) -> ! {
+        let mut usb_serial = cx.resources.usb_serial;
+        let mut usb_rx_buf = cx.resources.usb_rx_buf;
+        let mut uart_serial = cx.resources.uart_serial;
+        let mut uart_rx_buf = cx.resources.uart_rx_buf;
 
         let ps = cx.resources.ps;
         let display = cx.resources.display;
 
-        ps.act(Act::UILoading("BOOT"));
-        display.render(ps).unwrap();
-
         let sdc = cx.resources.sdcard;
 
-        cx.resources
-            .uart_serial
+        ps.set_ui_loading(".,.,.");
+        display.render(ps).unwrap();
+
+        // Give GPIB/serial interface time to boot
+        for _ in 0..100 {
+            usb_serial.lock(|s| s.poll());
+            asm::delay(SYS_FREQ.0 / 100);
+        }
+
+        ps.set_ui_loading("BOOT");
+        display.render(ps).unwrap();
+
+        uart_serial
             .lock(|us| {
                 sdc.send_file("BOOT", |buf| us.write_buf(buf))
                     .and_then(|_| us.flush())
             })
-            .map_err(|e| ps.act(Act::ShowError(e)))
+            .map_err(|e| ps.show_error(e))
             .ok();
 
-        ps.act(Act::UILoading("Running ..."));
+        ps.set_ui_loading("DONE");
         display.render(ps).unwrap();
 
+        ps.set_ui_info_screen();
+
+        let mut uart_line_buf: Vec<u8, U64> = Vec::new();
+        let mut usb_line_buf: Vec<u8, U64> = Vec::new();
+
         loop {
+            usb_serial.lock(|s| s.poll());
+
+            let usb_eol = usb_rx_buf.lock(|b| fill_until_eol(&mut usb_line_buf, b));
+            let uart_eol = uart_rx_buf.lock(|b| fill_until_eol(&mut uart_line_buf, b));
+
+            ifcfg!(
+                "bin_info",
+                hprintln!(
+                    "loop {} {} {} {}",
+                    usb_line_buf.len(),
+                    usb_eol,
+                    uart_line_buf.len(),
+                    uart_eol
+                )
+            );
+
+            // 1st line of input switches into UART serial adapter mode
+            if usb_eol {
+                ps.set_ui_usb_serial();
+                // Read what's left in the UART and throw out.
+                // USB serial will drive IO now
+                uart_line_buf.clear();
+                asm::delay(SYS_FREQ.0 / 4);
+                uart_rx_buf.lock(|b| fill_until_eol(&mut uart_line_buf, b));
+                uart_line_buf.clear();
+            }
+
+            match ps.ui {
+                UI::USSBSerial => {
+                    // Act as a UART serial adapter until reboot
+                    if uart_eol {
+                        usb_serial
+                            .lock(|s| s.write(&uart_line_buf))
+                            .map_err(|e| ps.show_error(e))
+                            .ok();
+
+                        uart_line_buf.clear();
+                    }
+
+                    // Lock means we can't receive while writing but it's Ok
+                    // for this particular request/response protocol
+                    if usb_eol {
+                        uart_serial
+                            .lock(|s| s.write_buf(&usb_line_buf).and_then(|_| s.flush()))
+                            .map_err(|e| ps.show_error(e))
+                            .ok();
+
+                        usb_line_buf.clear();
+                    }
+                }
+                _ => (),
+            }
+
             display.render(ps).unwrap();
-            cx.resources.usb_serial.lock(|s| s.poll());
         }
     }
 
@@ -229,37 +305,29 @@ const APP: () = {
             .unwrap();
     }
 
+    #[task(binds = USART2,
+        resources = [uart_serial, uart_rx_buf],
+        priority = 2)]
+    fn uart_poll(cx: uart_poll::Context) {
+        let uart_serial = cx.resources.uart_serial;
+        let mut uart_rx_buf = cx.resources.uart_rx_buf;
+        uart_serial.fill_buf(&mut uart_rx_buf).unwrap();
+    }
+
     #[task(binds = USB_HP_CAN_TX,
             resources = [usb_serial],
-            priority = 2)]
+            priority = 3)]
     fn usb_tx(cx: usb_tx::Context) {
         cx.resources.usb_serial.poll();
     }
+
     #[task(binds = USB_LP_CAN_RX0,
-            resources = [usb_serial, uart_serial],
-            priority = 2)]
+            resources = [usb_serial, usb_rx_buf],
+            priority = 3)]
     fn usb_rx(cx: usb_rx::Context) {
-        cx.resources.usb_serial.poll();
-
-        let mut buf: [u8; 16] = [0; 16];
-        match cx.resources.usb_serial.read(&mut buf) {
-            Ok(s) if s > 0 => {
-                cx.resources.uart_serial.write_buf(&buf[0..s]).unwrap();
-                cx.resources.uart_serial.flush().unwrap()
-            }
-            _ => {}
-        }
-    }
-
-    #[task(binds = USART2,
-        resources = [uart_serial, usb_serial],
-        priority = 2)]
-    fn uart_poll(cx: uart_poll::Context) {
-        let mut buf: Vec<u8, U16> = Vec::new();
-        cx.resources.uart_serial.fill_buf(&mut buf).unwrap();
-
-        // Ignore USB errors (may not be connected)
-        cx.resources.usb_serial.write(&buf).map_or((), |_| ());
+        let usb_serial = cx.resources.usb_serial;
+        let mut usb_rx_buf = cx.resources.usb_rx_buf;
+        usb_serial.read(&mut usb_rx_buf).unwrap();
     }
 
     // RTIC requires that unused interrupts are declared in an extern block when

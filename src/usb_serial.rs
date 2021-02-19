@@ -1,6 +1,8 @@
 use cortex_m_semihosting::*;
 
-use usb_device::{bus, prelude::*};
+use heapless::{ArrayLength, Vec};
+
+use usb_device::{bus, prelude::*, UsbError::WouldBlock};
 use usbd_serial::{DefaultBufferStore, SerialPort};
 
 use crate::prelude::*;
@@ -46,34 +48,55 @@ where
         }
     }
 
-    /// Serial read
+    /// Serial read append to the given vector, non-blocking
     #[inline]
-    pub fn read(&mut self, data: &mut [u8]) -> Result<usize, AppError> {
+    pub fn read<S>(&mut self, data: &mut Vec<u8, S>) -> Result<(), AppError>
+    where
+        S: ArrayLength<u8>,
+    {
         self.poll();
 
-        let size = if self.serial_port.dtr() {
-            self.serial_port.read(data)?
-        } else {
-            0
-        };
+        let mut buf = [0u8; 1];
+        while self.serial_port.dtr() && (data.capacity() > data.len()) {
+            match self.serial_port.read(&mut buf) {
+                Ok(_) => {
+                    ifcfg!("usb_debug", hprintln!("USB read {}", buf[0]));
+                    data.push(buf[0]).map_err(|_| AppError::UsbSerialError)?;
+                }
+                Err(WouldBlock) => break,
+                e => e.map(|_| ())?,
+            }
 
-        ifcfg!("usb_debug", hprintln!("USB read {}", size));
-        Ok(size)
+            self.poll();
+        }
+
+        Ok(())
     }
 
-    /// Serial write
+    /// Serial write all bytes out, blocking
     #[inline]
-    pub fn write(&mut self, data: &[u8]) -> Result<usize, AppError> {
+    pub fn write(&mut self, data: &[u8]) -> Result<(), AppError> {
         self.poll();
 
-        let size = if self.serial_port.dtr() {
-            self.serial_port.write(data)?
-        } else {
-            0
-        };
+        if self.serial_port.dtr() {
+            let mut n = 0;
+            while n < data.len() - 1 {
+                match self.serial_port.write(&data[n..]) {
+                    Ok(s) => {
+                        ifcfg!("usb_debug", hprintln!("USB write {}", s));
+                        n += s;
+                    }
+                    Err(WouldBlock) => {
+                        ifcfg!("usb_debug", hprintln!("USB write blocked"));
+                    }
+                    e => {
+                        e?;
+                    }
+                }
+            }
+        }
 
-        ifcfg!("usb_debug", hprintln!("USB write {}", size));
-        Ok(size)
+        Ok(())
     }
 }
 

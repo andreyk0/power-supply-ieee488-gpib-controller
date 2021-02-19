@@ -1,6 +1,7 @@
+use cortex_m_semihosting::*;
+
 use core::ops::FnMut;
 
-use cortex_m_semihosting::*;
 use embedded_sdmmc::{filesystem::Mode, SdMmcError, Volume, VolumeIdx};
 
 use crate::prelude::*;
@@ -43,6 +44,7 @@ impl SDCard {
     {
         let mut vol = self.init()?;
         let r = self.controller.open_root_dir(&vol)?;
+
         let mut f = self
             .controller
             .open_file_in_dir(&mut vol, &r, fname, Mode::ReadOnly)?;

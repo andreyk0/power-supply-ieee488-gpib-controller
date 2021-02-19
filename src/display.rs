@@ -1,6 +1,4 @@
-use core::convert::Infallible;
-
-use core::fmt::Write;
+use core::{convert::Infallible, fmt::Write};
 
 use embedded_hal::blocking::delay::DelayUs;
 
@@ -83,13 +81,46 @@ impl Display {
         Ok(())
     }
 
+    #[inline]
     fn render_ui(self: &mut Self, ps: &UI) -> Result<(), AppError> {
-        let UI::UILoading(s) = ps;
+        match ps {
+            UI::UILoading(s) => self.render_ui_loading(s),
+            UI::USSBSerial => self.render_usb_serial(),
+            UI::InfoScreen(is) => self.render_info_screen(is),
+        }
+    }
+
+    #[inline]
+    fn render_ui_loading(self: &mut Self, s: &str) -> Result<(), AppError> {
         let mut buf: String<U64> = String::new();
         write!(&mut buf, "Loading {} ...", s)?;
 
         egtext!(
             text = &buf,
+            top_left = Point::new(2, HEIGHT / 2 - 3),
+            style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
+        )
+        .draw(&mut self.device)?;
+
+        Ok(())
+    }
+
+    #[inline]
+    fn render_usb_serial(self: &mut Self) -> Result<(), AppError> {
+        egtext!(
+            text = "<< USB serial >>",
+            top_left = Point::new(2, HEIGHT / 2 - 3),
+            style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
+        )
+        .draw(&mut self.device)?;
+
+        Ok(())
+    }
+
+    #[inline]
+    fn render_info_screen(self: &mut Self, _info: &InfoScreen) -> Result<(), AppError> {
+        egtext!(
+            text = "_ INFO _",
             top_left = Point::new(2, HEIGHT / 2 - 3),
             style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
         )

@@ -2,22 +2,19 @@
 
 use crate::error::*;
 
-/// Action messages that facilitate state transitions
-pub enum Act {
-    ShowError(AppError),
-    ClearError,
-    UILoading(&'static str),
-}
-
 /// State of the power supply controller
 pub struct PS {
     pub error: Option<AppError>,
     pub ui: UI,
 }
 
+pub struct InfoScreen {}
+
 /// UI states
 pub enum UI {
     UILoading(&'static str),
+    USSBSerial,
+    InfoScreen(InfoScreen),
 }
 
 impl PS {
@@ -28,12 +25,30 @@ impl PS {
         }
     }
 
-    pub fn act(&mut self, a: Act) {
-        match a {
-            Act::ShowError(e) if self.error.is_none() => self.error = Some(e),
-            Act::ShowError(_) => (),
-            Act::ClearError => self.error = None,
-            Act::UILoading(s) => self.ui = UI::UILoading(s),
+    #[inline]
+    pub fn show_error(&mut self, e: AppError) {
+        if self.error.is_none() {
+            self.error = Some(e)
         }
+    }
+
+    #[inline]
+    pub fn clear_error(&mut self) {
+        self.error = None
+    }
+
+    #[inline]
+    pub fn set_ui_loading(&mut self, s: &'static str) {
+        self.ui = UI::UILoading(s)
+    }
+
+    #[inline]
+    pub fn set_ui_usb_serial(&mut self) {
+        self.ui = UI::USSBSerial
+    }
+
+    #[inline]
+    pub fn set_ui_info_screen(&mut self) {
+        self.ui = UI::InfoScreen(InfoScreen {})
     }
 }

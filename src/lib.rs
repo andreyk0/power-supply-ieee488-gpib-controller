@@ -8,6 +8,7 @@ pub mod consts;
 pub mod delay;
 pub mod display;
 pub mod error;
+pub mod line;
 pub mod model;
 pub mod sdcard;
 pub mod time;
