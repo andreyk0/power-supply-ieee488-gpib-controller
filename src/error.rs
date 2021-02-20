@@ -11,6 +11,7 @@ pub enum AppError {
     UsbSerialError,
     UartSerialError,
     DisplayError(&'static str),
+    ParseError,
 }
 
 impl From<Infallible> for AppError {

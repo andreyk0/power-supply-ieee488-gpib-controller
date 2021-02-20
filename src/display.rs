@@ -3,8 +3,7 @@ use core::{convert::Infallible, fmt::Write};
 use embedded_hal::blocking::delay::DelayUs;
 
 use embedded_graphics::{
-    egtext, fonts::Font6x6, pixelcolor::BinaryColor, prelude::*, primitives::*, style::*,
-    text_style,
+    egtext, fonts::*, pixelcolor::BinaryColor, prelude::*, primitives::*, style::*, text_style,
 };
 
 use stm32f1xx_hal::spi;
@@ -118,10 +117,49 @@ impl Display {
     }
 
     #[inline]
-    fn render_info_screen(self: &mut Self, _info: &InfoScreen) -> Result<(), AppError> {
+    fn render_info_screen(self: &mut Self, info: &InfoScreen) -> Result<(), AppError> {
+        self.render_ps_channel(2, &info.ch1)?;
+        self.render_ps_channel(65, &info.ch2)
+    }
+
+    fn render_ps_channel(self: &mut Self, xoff: i32, ch: &PSChannel) -> Result<(), AppError> {
+        let mut s: String<U32> = String::new();
+
+        write!(s, "V: {:.3}", OptF32Fmt(ch.vout))?;
+
         egtext!(
-            text = "_ INFO _",
-            top_left = Point::new(2, HEIGHT / 2 - 3),
+            text = &s,
+            top_left = Point::new(xoff + 2, 5),
+            style = text_style!(font = Font6x8, text_color = BinaryColor::On,)
+        )
+        .draw(&mut self.device)?;
+
+        s.clear();
+        write!(s, "I: {:.3}", OptF32Fmt(ch.iout))?;
+
+        egtext!(
+            text = &s,
+            top_left = Point::new(xoff + 2, 14),
+            style = text_style!(font = Font6x8, text_color = BinaryColor::On,)
+        )
+        .draw(&mut self.device)?;
+
+        s.clear();
+        write!(s, "Vset: {:.3}", OptF32Fmt(ch.vset))?;
+
+        egtext!(
+            text = &s,
+            top_left = Point::new(xoff + 2, 23),
+            style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
+        )
+        .draw(&mut self.device)?;
+
+        s.clear();
+        write!(s, "Iset: {:.3}", OptF32Fmt(ch.iset))?;
+
+        egtext!(
+            text = &s,
+            top_left = Point::new(xoff + 2, 30),
             style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
         )
         .draw(&mut self.device)?;
@@ -133,5 +171,22 @@ impl Display {
 impl From<st7920::Error<spi::Error, Infallible>> for AppError {
     fn from(_: st7920::Error<spi::Error, Infallible>) -> Self {
         AppError::DisplayError("SPI")
+    }
+}
+
+struct OptF32Fmt(Option<f32>);
+
+impl core::fmt::Display for OptF32Fmt {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.0 {
+            None => f.write_str("---"),
+            Some(v) => {
+                if v < 0.0f32 {
+                    0.0f32.fmt(f)
+                } else {
+                    v.fmt(f)
+                }
+            }
+        }
     }
 }

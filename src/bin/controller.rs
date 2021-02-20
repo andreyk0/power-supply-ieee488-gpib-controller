@@ -3,6 +3,8 @@
 
 use panic_halt as _;
 
+use core::fmt::Write;
+
 use cortex_m::asm;
 use cortex_m_semihosting::*;
 
@@ -12,16 +14,17 @@ use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::spi as espi;
 
 use rtic::cyccnt::Duration;
+use rtic::Mutex;
 
 use usb_device::bus;
 
 use st7920::ST7920;
 
-use heapless::{consts::*, Vec};
+use heapless::{consts::*, String, Vec};
 
 use power_supply_ieee488_gpib_controller::*;
 use power_supply_ieee488_gpib_controller::{
-    display::*, line::*, model::*, prelude::*, sdcard::*, time::*, uart_serial::*,
+    display::*, line::*, model::*, prelude::*, protocol::*, sdcard::*, time::*, uart_serial::*,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -38,9 +41,12 @@ const APP: () = {
 
         uart_rx_buf: Vec<u8, U32>,
         usb_rx_buf: Vec<u8, U32>,
+
+        query: Option<Query>,
+        query_idx: usize,
     }
 
-    #[init(schedule = [blink])]
+    #[init(schedule = [ping])]
     fn init(cx: init::Context) -> init::LateResources {
         static mut USB_BUS: Option<bus::UsbBusAllocator<usb::UsbBus<usb::Peripheral>>> = None;
 
@@ -89,7 +95,7 @@ const APP: () = {
         let mut display =
             Display::new(ST7920::new(lcd_spi, lcd_reset, Some(lcd_cs), false)).unwrap();
 
-        ps.set_ui_loading("blink");
+        ps.set_ui_loading("ping");
         display.render(&ps).unwrap();
 
         let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
@@ -101,7 +107,7 @@ const APP: () = {
         core.DWT.enable_cycle_counter();
 
         cx.schedule
-            .blink(cx.start + Duration::from_cycles(SYS_FREQ.0 / 2))
+            .ping(cx.start + Duration::from_cycles(SYS_FREQ.0 / 2))
             .unwrap();
 
         ps.set_ui_loading("usbp");
@@ -194,114 +200,37 @@ const APP: () = {
             sdcard,
             uart_rx_buf,
             usb_rx_buf,
+            query: None,
+            query_idx: 0,
         }
     }
 
-    #[idle(resources = [ps, display, sdcard, usb_serial, uart_serial, usb_rx_buf, uart_rx_buf])]
+    #[idle(resources = [ps, display, sdcard, usb_serial, uart_serial, usb_rx_buf, uart_rx_buf, query])]
     fn idle(cx: idle::Context) -> ! {
-        let mut usb_serial = cx.resources.usb_serial;
-        let mut usb_rx_buf = cx.resources.usb_rx_buf;
-        let mut uart_serial = cx.resources.uart_serial;
-        let mut uart_rx_buf = cx.resources.uart_rx_buf;
-
-        let ps = cx.resources.ps;
-        let display = cx.resources.display;
-
-        let sdc = cx.resources.sdcard;
-
-        ps.set_ui_loading(".,.,.");
-        display.render(ps).unwrap();
-
-        // Give GPIB/serial interface time to boot
-        for _ in 0..100 {
-            usb_serial.lock(|s| s.poll());
-            asm::delay(SYS_FREQ.0 / 100);
-        }
-
-        ps.set_ui_loading("BOOT");
-        display.render(ps).unwrap();
-
-        uart_serial
-            .lock(|us| {
-                sdc.send_file("BOOT", |buf| us.write_buf(buf))
-                    .and_then(|_| us.flush())
-            })
-            .map_err(|e| ps.show_error(e))
-            .ok();
-
-        ps.set_ui_loading("DONE");
-        display.render(ps).unwrap();
-
-        ps.set_ui_info_screen();
-
-        let mut uart_line_buf: Vec<u8, U64> = Vec::new();
-        let mut usb_line_buf: Vec<u8, U64> = Vec::new();
+        let mut il = IdleLoop::new(cx);
+        il.boot().unwrap();
 
         loop {
-            usb_serial.lock(|s| s.poll());
-
-            let usb_eol = usb_rx_buf.lock(|b| fill_until_eol(&mut usb_line_buf, b));
-            let uart_eol = uart_rx_buf.lock(|b| fill_until_eol(&mut uart_line_buf, b));
-
-            ifcfg!(
-                "bin_info",
-                hprintln!(
-                    "loop {} {} {} {}",
-                    usb_line_buf.len(),
-                    usb_eol,
-                    uart_line_buf.len(),
-                    uart_eol
-                )
-            );
-
-            // 1st line of input switches into UART serial adapter mode
-            if usb_eol {
-                ps.set_ui_usb_serial();
-                // Read what's left in the UART and throw out.
-                // USB serial will drive IO now
-                uart_line_buf.clear();
-                asm::delay(SYS_FREQ.0 / 4);
-                uart_rx_buf.lock(|b| fill_until_eol(&mut uart_line_buf, b));
-                uart_line_buf.clear();
-            }
-
-            match ps.ui {
-                UI::USSBSerial => {
-                    // Act as a UART serial adapter until reboot
-                    if uart_eol {
-                        usb_serial
-                            .lock(|s| s.write(&uart_line_buf))
-                            .map_err(|e| ps.show_error(e))
-                            .ok();
-
-                        uart_line_buf.clear();
-                    }
-
-                    // Lock means we can't receive while writing but it's Ok
-                    // for this particular request/response protocol
-                    if usb_eol {
-                        uart_serial
-                            .lock(|s| s.write_buf(&usb_line_buf).and_then(|_| s.flush()))
-                            .map_err(|e| ps.show_error(e))
-                            .ok();
-
-                        usb_line_buf.clear();
-                    }
-                }
-                _ => (),
-            }
-
-            display.render(ps).unwrap();
+            il.try_read_lines();
+            il.handle_state_ok();
         }
     }
 
-    #[task(resources = [led],
-           schedule = [blink],
+    #[task(resources = [led, query, query_idx],
+           schedule = [ping],
            priority = 1)]
-    fn blink(cx: blink::Context) {
+    fn ping(cx: ping::Context) {
         cx.resources.led.toggle().unwrap();
+
+        let q = cx.resources.query;
+        let qidx = cx.resources.query_idx;
+        if q.is_none() {
+            q.replace(QUERY_PING_LOOP[*qidx]);
+            *qidx = (*qidx + 1usize) % QUERY_PING_LOOP.len();
+        }
+
         cx.schedule
-            .blink(cx.scheduled + Duration::from_cycles(SYS_FREQ.0 / 2))
+            .ping(cx.scheduled + Duration::from_cycles(SYS_FREQ.0 / 16))
             .unwrap();
     }
 
@@ -342,3 +271,229 @@ const APP: () = {
         fn CAN_SCE();
     }
 };
+
+struct IdleLoop<'a> {
+    usb_serial: resources::usb_serial<'a>,
+    usb_rx_buf: resources::usb_rx_buf<'a>,
+    uart_serial: resources::uart_serial<'a>,
+    uart_rx_buf: resources::uart_rx_buf<'a>,
+    query: resources::query<'a>,
+    query_sent: bool,
+    ps: &'a mut PS,
+    display: &'a mut Display,
+    sdc: &'a mut SDCard,
+    usb_line_buf: Vec<u8, U64>,
+    usb_eol: bool,
+    uart_line_buf: Vec<u8, U64>,
+    uart_eol: bool,
+}
+
+impl<'a> IdleLoop<'a> {
+    pub fn new(cx: idle::Context<'a>) -> Self {
+        IdleLoop {
+            usb_serial: cx.resources.usb_serial,
+            usb_rx_buf: cx.resources.usb_rx_buf,
+            uart_serial: cx.resources.uart_serial,
+            uart_rx_buf: cx.resources.uart_rx_buf,
+            query: cx.resources.query,
+            query_sent: false,
+            ps: cx.resources.ps,
+            display: cx.resources.display,
+            sdc: cx.resources.sdcard,
+            usb_line_buf: Vec::new(),
+            usb_eol: false,
+            uart_line_buf: Vec::new(),
+            uart_eol: false,
+        }
+    }
+
+    #[inline]
+    fn render_loading(&mut self, s: &'static str) -> Result<(), AppError> {
+        self.ps.set_ui_loading(s);
+        self.display.render(self.ps)
+    }
+
+    #[inline]
+    fn show_err<F>(&mut self, mut fun: F) -> Result<(), AppError>
+    where
+        F: FnMut(&mut Self) -> Result<(), AppError>,
+    {
+        match fun(self) {
+            Err(e) => self.ps.show_error(e),
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn show_err_ok<F>(&mut self, fun: F)
+    where
+        F: FnMut(&mut Self) -> Result<(), AppError>,
+    {
+        self.show_err(fun).ok();
+    }
+
+    pub fn boot(&mut self) -> Result<(), AppError> {
+        self.render_loading(".,.,.")?;
+
+        // Give GPIB/serial interface time to boot
+        for _ in 0..100 {
+            self.usb_serial.lock(|s| s.poll());
+            asm::delay(SYS_FREQ.0 / 100);
+        }
+
+        self.render_loading("BOOT")?;
+
+        self.show_err_ok(|slf| {
+            let sdc = &mut slf.sdc;
+            // we won't receive anything while sending the whole file but that's Ok
+            slf.uart_serial
+                .lock(|us| sdc.send_file("BOOT", |buf| us.write_buf_flush(buf)))
+        });
+
+        self.drain_uart_rx(); // in case there's any junk from loading a boot file
+        self.render_loading("DONE")?;
+
+        self.ps.set_ui_info_screen();
+
+        Ok(())
+    }
+
+    pub fn try_read_lines(&mut self) {
+        self.usb_serial.lock(|s| s.poll());
+
+        let usb_rx_buf = &mut self.usb_rx_buf;
+        let usb_line_buf = &mut self.usb_line_buf;
+
+        let uart_rx_buf = &mut self.uart_rx_buf;
+        let uart_line_buf = &mut self.uart_line_buf;
+
+        self.usb_eol = usb_rx_buf.lock(|b| fill_until_eol(usb_line_buf, b));
+
+        self.uart_eol = uart_rx_buf.lock(|b| fill_until_eol(uart_line_buf, b));
+
+        ifcfg!(
+            "bin_info",
+            hprintln!(
+                "loop {} {} {} {}",
+                self.usb_line_buf.len(),
+                self.usb_eol,
+                uart_line_buf.len(),
+                self.uart_eol
+            )
+        );
+
+        // 1st line of input switches into UART serial adapter mode
+        if self.usb_eol {
+            self.ps.set_ui_usb_serial();
+            // Read what's left in the UART and throw out.
+            // USB serial will drive IO now
+            self.drain_uart_rx();
+        }
+    }
+
+    /// Read/throw away what's currently in the buffer
+    fn drain_uart_rx(&mut self) {
+        let uart_line_buf = &mut self.uart_line_buf;
+        uart_line_buf.clear();
+        for _ in 0..4 {
+            asm::delay(SYS_FREQ.0 / 8);
+            self.uart_rx_buf.lock(|b| fill_until_eol(uart_line_buf, b));
+            uart_line_buf.clear();
+        }
+        self.uart_eol = false;
+    }
+
+    pub fn handle_state_ok(&mut self) {
+        self.show_err_ok(|slf| slf.handle_state());
+
+        self.display.render(self.ps).unwrap();
+    }
+
+    #[inline]
+    fn handle_state(&mut self) -> Result<(), AppError> {
+        match &mut self.ps.ui {
+            UI::USSBSerial => self.handle_state_usb_serial(),
+            UI::InfoScreen(is) => IdleLoop::handle_state_info_screen(
+                &mut self.usb_serial,
+                &mut self.uart_serial,
+                &mut self.uart_eol,
+                &mut self.uart_line_buf,
+                &mut self.query,
+                &mut self.query_sent,
+                is,
+            ),
+            _ => Ok(()),
+        }
+    }
+
+    #[inline]
+    fn handle_state_usb_serial(&mut self) -> Result<(), AppError> {
+        let usb_line_buf = &mut self.usb_line_buf;
+        let uart_line_buf = &mut self.uart_line_buf;
+
+        // Act as a UART serial adapter until reboot
+        if self.uart_eol {
+            self.usb_serial.lock(|s| s.write(&uart_line_buf))?;
+            self.uart_line_buf.clear();
+        }
+
+        // Lock means we can't receive while writing but it's Ok
+        // for this particular request/response protocol
+        if self.usb_eol {
+            self.uart_serial
+                .lock(|s| s.write_buf_flush(&usb_line_buf))?;
+            self.usb_line_buf.clear();
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn handle_state_info_screen(
+        usb_serial: &mut resources::usb_serial<'a>,
+        uart_serial: &mut resources::uart_serial<'a>,
+        uart_eol: &mut bool,
+        uart_line_buf: &mut Vec<u8, U64>,
+        query: &mut resources::query<'a>,
+        query_sent: &mut bool,
+        is: &mut InfoScreen,
+    ) -> Result<(), AppError> {
+        let q = query.lock(|qopt| match qopt {
+            None => Ok::<Option<Query>, AppError>(None),
+            Some(q) => {
+                if !(*query_sent) {
+                    let mut sbuf: String<U32> = String::new();
+                    q.write_serial_cmd_buf(&mut sbuf);
+                    uart_serial.lock(|s| s.write_buf_flush(&sbuf.into_bytes()))?;
+                    *query_sent = true;
+                }
+
+                if *uart_eol {
+                    *query_sent = false;
+                    Ok(qopt.take())
+                } else {
+                    Ok(None)
+                }
+            }
+        });
+
+        match q? {
+            None => {}
+            Some(q) => {
+                let v = parse_f32(uart_line_buf)?;
+                uart_line_buf.clear();
+
+                ifcfg!("bin_info", hprintln!("qres {:?} {}", q, v));
+                is.set_query_result(&q, v);
+                // send query/response to USB host
+                let mut buf: String<U64> = String::new();
+                buf.push_str(&q.to_str()).map_err(|_| AppError::Duh)?;
+                write!(buf, "\t{:.3}\r\n", v).map_err(|_| AppError::Duh)?;
+                usb_serial.lock(|s| s.write(&buf.into_bytes()))?;
+            }
+        }
+        Ok(())
+    }
+}

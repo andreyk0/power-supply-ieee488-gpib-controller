@@ -1,6 +1,8 @@
 //! Read line from a buffer
 
-use heapless::{ArrayLength, Vec};
+use heapless::{ArrayLength, String, Vec};
+
+use crate::prelude::*;
 
 pub fn fill_until_eol<S1, S2>(line_buf: &mut Vec<u8, S1>, data_buf: &mut Vec<u8, S2>) -> bool
 where
@@ -38,4 +40,26 @@ where
     }
 
     found
+}
+
+pub fn parse_f32<S>(line: &Vec<u8, S>) -> Result<f32, AppError>
+where
+    S: ArrayLength<u8>,
+{
+    let mut str: String<S> = String::new();
+
+    for b in line {
+        if b.is_ascii_whitespace() {
+            continue;
+        }
+        str.push(*b as char).map_err(|_| AppError::Duh)?;
+    }
+
+    Ok(str.parse::<f32>()?)
+}
+
+impl From<core::num::ParseFloatError> for AppError {
+    fn from(_: core::num::ParseFloatError) -> Self {
+        AppError::ParseError
+    }
 }

@@ -10,6 +10,7 @@ pub mod display;
 pub mod error;
 pub mod line;
 pub mod model;
+pub mod protocol;
 pub mod sdcard;
 pub mod time;
 pub mod types;

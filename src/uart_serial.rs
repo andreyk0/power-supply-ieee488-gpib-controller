@@ -27,6 +27,12 @@ impl UartSerial {
         Ok(())
     }
 
+    #[inline]
+    pub fn write_buf_flush(&mut self, buf: &[u8]) -> Result<(), AppError> {
+        self.write_buf(buf)?;
+        self.flush()
+    }
+
     pub fn write_buf(&mut self, buf: &[u8]) -> Result<(), AppError> {
         for c in buf {
             ifcfg!("uart_debug", hprintln!("UART write {}", c));
