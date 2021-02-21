@@ -10,7 +10,8 @@ version = "0.1.0"
 default = [
   #"sdc_info",
   #"sdc_debug",
-  #"bin_info",
+  #"bin_debug",
+  "bin_info",
   #"render_debug",
   #"uart_debug",
   #"usb_debug",
@@ -28,6 +29,9 @@ usb_debug = []
 
 # main binary info messages
 bin_info = []
+
+# main binary debug messages
+bin_debug = []
 
 # introduce rendering delay for debugging
 render_debug = []
@@ -93,8 +97,7 @@ debug = false
 
 # Optimize all the other dependencies
 [profile.dev.package."*"]
-opt-level = "s"
-debug = false
+opt-level = "z"
 
 [profile.release.package."*"]
 opt-level = "s"

@@ -47,3 +47,5 @@ pub type SDCardController = embedded_sdmmc::Controller<
     >,
     DummyTimeSource,
 >;
+
+pub type PauseButtonPin = gpiob::PB0<Input<PullUp>>;

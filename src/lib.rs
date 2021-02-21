@@ -4,6 +4,7 @@
 #[macro_use]
 pub mod macros;
 
+pub mod button;
 pub mod consts;
 pub mod delay;
 pub mod display;

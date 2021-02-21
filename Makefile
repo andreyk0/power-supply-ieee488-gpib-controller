@@ -31,7 +31,10 @@ erase:
 	st-flash erase
 
 size:
-	cargo size --bin $(NAME) -- -A
+	size -A $(ELF_TARGET)
+
+bloat:
+	cargo bloat -n 50
 
 clean:
 	cargo clean

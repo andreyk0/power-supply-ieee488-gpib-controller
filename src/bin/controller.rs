@@ -24,7 +24,8 @@ use heapless::{consts::*, String, Vec};
 
 use power_supply_ieee488_gpib_controller::*;
 use power_supply_ieee488_gpib_controller::{
-    display::*, line::*, model::*, prelude::*, protocol::*, sdcard::*, time::*, uart_serial::*,
+    button::*, display::*, line::*, model::*, prelude::*, protocol::*, sdcard::*, time::*,
+    uart_serial::*,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -44,6 +45,8 @@ const APP: () = {
 
         query: Option<Query>,
         query_idx: usize,
+
+        btn_pause: Button<PauseButtonPin>,
     }
 
     #[init(schedule = [ping])]
@@ -184,6 +187,11 @@ const APP: () = {
             DummyTimeSource {},
         ));
 
+        ps.set_ui_loading("buttons");
+        display.render(&ps).unwrap();
+        let btn_pause_pin = gpiob.pb0.into_pull_up_input(&mut gpiob.crl);
+        let btn_pause = Button::new(btn_pause_pin, &device.EXTI, &mut afio).unwrap();
+
         ps.set_ui_loading("resources");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("resources"));
@@ -202,10 +210,23 @@ const APP: () = {
             usb_rx_buf,
             query: None,
             query_idx: 0,
+
+            btn_pause,
         }
     }
 
-    #[idle(resources = [ps, display, sdcard, usb_serial, uart_serial, usb_rx_buf, uart_rx_buf, query])]
+    #[idle(resources = [
+        ps,
+        led,
+        display,
+        sdcard,
+        usb_serial,
+        uart_serial,
+        usb_rx_buf,
+        uart_rx_buf,
+        query,
+        btn_pause
+    ])]
     fn idle(cx: idle::Context) -> ! {
         let mut il = IdleLoop::new(cx);
         il.boot().unwrap();
@@ -216,12 +237,10 @@ const APP: () = {
         }
     }
 
-    #[task(resources = [led, query, query_idx],
+    #[task(resources = [query, query_idx],
            schedule = [ping],
            priority = 1)]
     fn ping(cx: ping::Context) {
-        cx.resources.led.toggle().unwrap();
-
         let q = cx.resources.query;
         let qidx = cx.resources.query_idx;
         if q.is_none() {
@@ -234,9 +253,16 @@ const APP: () = {
             .unwrap();
     }
 
+    #[task(binds = EXTI0,
+        resources = [btn_pause],
+        priority = 2)]
+    fn btn_pause_poll(cx: btn_pause_poll::Context) {
+        cx.resources.btn_pause.poll().unwrap();
+    }
+
     #[task(binds = USART2,
         resources = [uart_serial, uart_rx_buf],
-        priority = 2)]
+        priority = 3)]
     fn uart_poll(cx: uart_poll::Context) {
         let uart_serial = cx.resources.uart_serial;
         let mut uart_rx_buf = cx.resources.uart_rx_buf;
@@ -245,14 +271,14 @@ const APP: () = {
 
     #[task(binds = USB_HP_CAN_TX,
             resources = [usb_serial],
-            priority = 3)]
+            priority = 4)]
     fn usb_tx(cx: usb_tx::Context) {
         cx.resources.usb_serial.poll();
     }
 
     #[task(binds = USB_LP_CAN_RX0,
             resources = [usb_serial, usb_rx_buf],
-            priority = 3)]
+            priority = 4)]
     fn usb_rx(cx: usb_rx::Context) {
         let usb_serial = cx.resources.usb_serial;
         let mut usb_rx_buf = cx.resources.usb_rx_buf;
@@ -273,6 +299,7 @@ const APP: () = {
 };
 
 struct IdleLoop<'a> {
+    led: &'a mut LedPin,
     usb_serial: resources::usb_serial<'a>,
     usb_rx_buf: resources::usb_rx_buf<'a>,
     uart_serial: resources::uart_serial<'a>,
@@ -286,11 +313,14 @@ struct IdleLoop<'a> {
     usb_eol: bool,
     uart_line_buf: Vec<u8, U64>,
     uart_eol: bool,
+
+    btn_pause: resources::btn_pause<'a>,
 }
 
 impl<'a> IdleLoop<'a> {
     pub fn new(cx: idle::Context<'a>) -> Self {
         IdleLoop {
+            led: cx.resources.led,
             usb_serial: cx.resources.usb_serial,
             usb_rx_buf: cx.resources.usb_rx_buf,
             uart_serial: cx.resources.uart_serial,
@@ -304,6 +334,8 @@ impl<'a> IdleLoop<'a> {
             usb_eol: false,
             uart_line_buf: Vec::new(),
             uart_eol: false,
+
+            btn_pause: cx.resources.btn_pause,
         }
     }
 
@@ -374,7 +406,7 @@ impl<'a> IdleLoop<'a> {
         self.uart_eol = uart_rx_buf.lock(|b| fill_until_eol(uart_line_buf, b));
 
         ifcfg!(
-            "bin_info",
+            "bin_debug",
             hprintln!(
                 "loop {} {} {} {}",
                 self.usb_line_buf.len(),
@@ -405,9 +437,10 @@ impl<'a> IdleLoop<'a> {
         self.uart_eol = false;
     }
 
+    /// Main loop, ignore errors or crash completely on this level
     pub fn handle_state_ok(&mut self) {
+        self.led.toggle().unwrap();
         self.show_err_ok(|slf| slf.handle_state());
-
         self.display.render(self.ps).unwrap();
     }
 
@@ -416,6 +449,7 @@ impl<'a> IdleLoop<'a> {
         match &mut self.ps.ui {
             UI::USSBSerial => self.handle_state_usb_serial(),
             UI::InfoScreen(is) => IdleLoop::handle_state_info_screen(
+                &mut self.btn_pause,
                 &mut self.usb_serial,
                 &mut self.uart_serial,
                 &mut self.uart_eol,
@@ -452,6 +486,7 @@ impl<'a> IdleLoop<'a> {
 
     #[inline]
     fn handle_state_info_screen(
+        btn_pause: &mut resources::btn_pause<'a>,
         usb_serial: &mut resources::usb_serial<'a>,
         uart_serial: &mut resources::uart_serial<'a>,
         uart_eol: &mut bool,
@@ -460,6 +495,15 @@ impl<'a> IdleLoop<'a> {
         query_sent: &mut bool,
         is: &mut InfoScreen,
     ) -> Result<(), AppError> {
+        let pause_press = btn_pause.lock(|b| b.take_last_press(time::MilliSeconds(60)));
+
+        ifcfg!("bin_info", {
+            match pause_press {
+                None => Ok(()),
+                Some(p) => hprintln!("BTN {}", p.0),
+            }
+        });
+
         let q = query.lock(|qopt| match qopt {
             None => Ok::<Option<Query>, AppError>(None),
             Some(q) => {
