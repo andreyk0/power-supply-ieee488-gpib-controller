@@ -1,4 +1,3 @@
-#![deny(unsafe_code)]
 #![no_std]
 
 #[macro_use]
@@ -12,6 +11,7 @@ pub mod error;
 pub mod line;
 pub mod model;
 pub mod protocol;
+pub mod rotary_encoder;
 pub mod sdcard;
 pub mod time;
 pub mod types;

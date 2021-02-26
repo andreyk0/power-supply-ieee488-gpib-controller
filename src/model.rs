@@ -1,7 +1,6 @@
 //! UI model
 
-use crate::error::*;
-use crate::protocol::*;
+use crate::{error::*, protocol::*};
 
 /// State of the power supply controller
 pub struct PS {

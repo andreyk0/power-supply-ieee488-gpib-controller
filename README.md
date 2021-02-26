@@ -2,6 +2,22 @@
 
 Control Agilent 6621A power supply over GPIB interface
 
+## NEXT
+
+Info view
+
+* button short press - both channels on/off
+* button long press - file selector UI
+* rotary encoder - V adjust
+* rotary encoder (while pressed) - I adjust
+* rotary encoder (press/release, no turn) - [ch1, ch2, ch1+2]
+
+File view
+
+* encoder scroll, press to run
+* button cancel, back to info screen
+
+
 
 ## Serial adapter
 

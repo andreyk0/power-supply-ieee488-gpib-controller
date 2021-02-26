@@ -49,3 +49,5 @@ pub type SDCardController = embedded_sdmmc::Controller<
 >;
 
 pub type PauseButtonPin = gpiob::PB0<Input<PullUp>>;
+
+pub type EncoderButtonPin = gpioa::PA10<Input<PullUp>>;

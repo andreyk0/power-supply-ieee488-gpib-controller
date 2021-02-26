@@ -24,8 +24,8 @@ use heapless::{consts::*, String, Vec};
 
 use power_supply_ieee488_gpib_controller::*;
 use power_supply_ieee488_gpib_controller::{
-    button::*, display::*, line::*, model::*, prelude::*, protocol::*, sdcard::*, time::*,
-    uart_serial::*,
+    button::*, display::*, line::*, model::*, prelude::*, protocol::*, rotary_encoder::*,
+    sdcard::*, time::*, uart_serial::*,
 };
 
 #[rtic::app(device = stm32f1xx_hal::stm32,
@@ -47,6 +47,9 @@ const APP: () = {
         query_idx: usize,
 
         btn_pause: Button<PauseButtonPin>,
+        btn_encoder: Button<EncoderButtonPin>,
+
+        rotary_encoder: RotaryEncoder,
     }
 
     #[init(schedule = [ping])]
@@ -192,6 +195,16 @@ const APP: () = {
         let btn_pause_pin = gpiob.pb0.into_pull_up_input(&mut gpiob.crl);
         let btn_pause = Button::new(btn_pause_pin, &device.EXTI, &mut afio).unwrap();
 
+        let btn_encoder_pin = gpioa.pa10.into_pull_up_input(&mut gpioa.crh);
+        let btn_encoder = Button::new(btn_encoder_pin, &device.EXTI, &mut afio).unwrap();
+
+        ps.set_ui_loading("rotary encoder");
+        display.render(&ps).unwrap();
+
+        gpioa.pa8.into_pull_up_input(&mut gpioa.crh);
+        gpioa.pa9.into_pull_up_input(&mut gpioa.crh);
+        let rotary_encoder = RotaryEncoder::new(device.TIM1);
+
         ps.set_ui_loading("resources");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("resources"));
@@ -212,6 +225,8 @@ const APP: () = {
             query_idx: 0,
 
             btn_pause,
+            btn_encoder,
+            rotary_encoder,
         }
     }
 
@@ -225,7 +240,9 @@ const APP: () = {
         usb_rx_buf,
         uart_rx_buf,
         query,
-        btn_pause
+        btn_pause,
+        btn_encoder,
+        rotary_encoder,
     ])]
     fn idle(cx: idle::Context) -> ! {
         let mut il = IdleLoop::new(cx);
@@ -258,6 +275,13 @@ const APP: () = {
         priority = 2)]
     fn btn_pause_poll(cx: btn_pause_poll::Context) {
         cx.resources.btn_pause.poll().unwrap();
+    }
+
+    #[task(binds = EXTI15_10,
+        resources = [btn_encoder],
+        priority = 2)]
+    fn btn_encoder_poll(cx: btn_encoder_poll::Context) {
+        cx.resources.btn_encoder.poll().unwrap();
     }
 
     #[task(binds = USART2,
@@ -315,6 +339,8 @@ struct IdleLoop<'a> {
     uart_eol: bool,
 
     btn_pause: resources::btn_pause<'a>,
+    btn_encoder: resources::btn_encoder<'a>,
+    rotary_encoder: &'a mut RotaryEncoder,
 }
 
 impl<'a> IdleLoop<'a> {
@@ -336,6 +362,8 @@ impl<'a> IdleLoop<'a> {
             uart_eol: false,
 
             btn_pause: cx.resources.btn_pause,
+            btn_encoder: cx.resources.btn_encoder,
+            rotary_encoder: cx.resources.rotary_encoder,
         }
     }
 
@@ -446,10 +474,13 @@ impl<'a> IdleLoop<'a> {
 
     #[inline]
     fn handle_state(&mut self) -> Result<(), AppError> {
+        let encoder_change = self.rotary_encoder.poll();
         match &mut self.ps.ui {
             UI::USSBSerial => self.handle_state_usb_serial(),
             UI::InfoScreen(is) => IdleLoop::handle_state_info_screen(
+                encoder_change,
                 &mut self.btn_pause,
+                &mut self.btn_encoder,
                 &mut self.usb_serial,
                 &mut self.uart_serial,
                 &mut self.uart_eol,
@@ -486,7 +517,9 @@ impl<'a> IdleLoop<'a> {
 
     #[inline]
     fn handle_state_info_screen(
+        encoder_change: i16,
         btn_pause: &mut resources::btn_pause<'a>,
+        btn_encoder: &mut resources::btn_encoder<'a>,
         usb_serial: &mut resources::usb_serial<'a>,
         uart_serial: &mut resources::uart_serial<'a>,
         uart_eol: &mut bool,
@@ -496,12 +529,24 @@ impl<'a> IdleLoop<'a> {
         is: &mut InfoScreen,
     ) -> Result<(), AppError> {
         let pause_press = btn_pause.lock(|b| b.take_last_press(time::MilliSeconds(60)));
+        let encoder_press = btn_encoder.lock(|b| b.take_last_press(time::MilliSeconds(60)));
 
         ifcfg!("bin_info", {
-            match pause_press {
+            (match pause_press {
                 None => Ok(()),
-                Some(p) => hprintln!("BTN {}", p.0),
-            }
+                Some(p) => hprintln!("BTN P {}", p.0),
+            })
+            .and_then(|_| match encoder_press {
+                None => Ok(()),
+                Some(e) => hprintln!("BTN E {}", e.0),
+            })
+            .and_then(|_| {
+                if encoder_change != 0 {
+                    hprintln!("RE {}", encoder_change)
+                } else {
+                    Ok(())
+                }
+            })
         });
 
         let q = query.lock(|qopt| match qopt {
