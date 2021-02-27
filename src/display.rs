@@ -118,11 +118,16 @@ impl Display {
 
     #[inline]
     fn render_info_screen(self: &mut Self, info: &InfoScreen) -> Result<(), AppError> {
-        self.render_ps_channel(2, &info.ch1)?;
-        self.render_ps_channel(65, &info.ch2)
+        self.render_ps_channel(2, &info.ch1, info.uich.as_ref().map(|u| &u.ch1))?;
+        self.render_ps_channel(65, &info.ch2, info.uich.as_ref().map(|u| &u.ch2))
     }
 
-    fn render_ps_channel(self: &mut Self, xoff: i32, ch: &PSChannel) -> Result<(), AppError> {
+    fn render_ps_channel(
+        self: &mut Self,
+        xoff: i32,
+        ch: &PSChannel,
+        uich: Option<&UIChannel>,
+    ) -> Result<(), AppError> {
         let mut s: String<U32> = String::new();
 
         write!(s, "V: {:.3}", OptF32Fmt(ch.vout))?;
@@ -145,7 +150,11 @@ impl Display {
         .draw(&mut self.device)?;
 
         s.clear();
-        write!(s, "Vset: {:.3}", OptF32Fmt(ch.vset))?;
+        write!(
+            s,
+            "Vset: {:.3}",
+            OptF32Fmt(uich.map(|u| u.vset).or(ch.vset))
+        )?;
 
         egtext!(
             text = &s,
@@ -155,7 +164,11 @@ impl Display {
         .draw(&mut self.device)?;
 
         s.clear();
-        write!(s, "Iset: {:.3}", OptF32Fmt(ch.iset))?;
+        write!(
+            s,
+            "Iset:  {:.3}",
+            OptF32Fmt(uich.map(|u| u.iset).or(ch.iset))
+        )?;
 
         egtext!(
             text = &s,

@@ -1,5 +1,7 @@
 //! Read line from a buffer
 
+use core::str::FromStr;
+
 use heapless::{ArrayLength, String, Vec};
 
 use crate::prelude::*;
@@ -42,24 +44,27 @@ where
     found
 }
 
-pub fn parse_f32<S>(line: &Vec<u8, S>) -> Result<f32, AppError>
+pub fn to_str_skip_whitespace<S>(line: &Vec<u8, S>, strbuf: &mut String<S>) -> Result<(), AppError>
 where
     S: ArrayLength<u8>,
 {
-    let mut str: String<S> = String::new();
+    strbuf.clear();
 
     for b in line {
         if b.is_ascii_whitespace() {
             continue;
         }
-        str.push(*b as char).map_err(|_| AppError::Duh)?;
+        strbuf.push(*b as char).map_err(|_| AppError::Duh)?;
     }
 
-    Ok(str.parse::<f32>()?)
+    Ok(())
 }
 
-impl From<core::num::ParseFloatError> for AppError {
-    fn from(_: core::num::ParseFloatError) -> Self {
-        AppError::ParseError
-    }
+#[inline]
+pub fn parse_str<S, N>(str: &String<S>) -> Result<N, AppError>
+where
+    S: ArrayLength<u8>,
+    N: FromStr,
+{
+    str.parse::<N>().map_err(|_| AppError::ParseError)
 }

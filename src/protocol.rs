@@ -2,7 +2,9 @@
 
 use core::fmt::Write;
 
-use heapless::{consts::*, String};
+use heapless::{consts::*, ArrayLength, String};
+
+use crate::prelude::AppError;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Channel {
@@ -20,56 +22,137 @@ impl Channel {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum Command {
-    Vset { ch: Channel, val: f32 },
-    Iset { ch: Channel, val: f32 },
+pub enum ChannelHeader {
+    Vset,
+    Iset,
+    Vout,
+    Iout,
+    Out,
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum Query {
-    Vset(Channel),
-    Iset(Channel),
-    Vout(Channel),
-    Iout(Channel),
+pub enum Command {
+    Vset { ch: Channel, val: f32 },
+    Iset { ch: Channel, val: f32 },
+    Out { ch: Channel, on: bool },
 }
 
-pub const QUERY_PING_LOOP: [Query; 8] = [
-    Query::Vset(Channel::Ch1),
-    Query::Iset(Channel::Ch1),
-    Query::Vset(Channel::Ch2),
-    Query::Iset(Channel::Ch2),
-    Query::Vout(Channel::Ch1),
-    Query::Iout(Channel::Ch1),
-    Query::Vout(Channel::Ch2),
-    Query::Iout(Channel::Ch2),
+impl Command {
+    pub fn append_to_str<S>(&self, buf: &mut String<S>) -> Result<(), AppError>
+    where
+        S: ArrayLength<u8>,
+    {
+        match self {
+            Command::Vset { ch, val } => write!(buf, "VSET {} {:.3};", ch.to_str(), val)?,
+            Command::Iset { ch, val } => write!(buf, "ISET {} {:.3};", ch.to_str(), val)?,
+            Command::Out { ch, on } => {
+                write!(buf, "OUT {} {};", ch.to_str(), if *on { "1" } else { "0" })?
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Query {
+    pub header: ChannelHeader,
+    pub channel: Channel,
+}
+
+pub const QUERY_PING_LOOP: [Query; 18] = [
+    Query {
+        header: ChannelHeader::Vset,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Vset,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Vout,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Vout,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Iout,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Iout,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Iset,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Iset,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Vout,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Vout,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Iout,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Iout,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Out,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Out,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Vout,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Vout,
+        channel: Channel::Ch2,
+    },
+    Query {
+        header: ChannelHeader::Iout,
+        channel: Channel::Ch1,
+    },
+    Query {
+        header: ChannelHeader::Iout,
+        channel: Channel::Ch2,
+    },
 ];
 
 impl Query {
     pub fn to_str(&self) -> String<U8> {
         let mut s: String<U8> = String::new();
 
-        let (q, ch) = match self {
-            Query::Vset(ch) => ("VSET", ch),
-            Query::Iset(ch) => ("ISET", ch),
-            Query::Vout(ch) => ("VOUT", ch),
-            Query::Iout(ch) => ("IOUT", ch),
+        let q = match self.header {
+            ChannelHeader::Vset => "VSET",
+            ChannelHeader::Iset => "ISET",
+            ChannelHeader::Vout => "VOUT",
+            ChannelHeader::Iout => "IOUT",
+            ChannelHeader::Out => "OUT",
         };
 
-        write!(s, "{}? {}", q, ch.to_str()).unwrap();
+        write!(s, "{}? {}", q, self.channel.to_str()).unwrap();
         s
     }
 
     pub fn write_serial_cmd_buf(&self, sbuf: &mut String<U32>) {
         sbuf.clear();
         write!(sbuf, "{}\r\n++read eoi\r\n", self.to_str()).unwrap();
-    }
-
-    pub fn query_channel(&self) -> Option<Channel> {
-        match self {
-            Query::Vset(ch) => Some(*ch),
-            Query::Iset(ch) => Some(*ch),
-            Query::Vout(ch) => Some(*ch),
-            Query::Iout(ch) => Some(*ch),
-        }
     }
 }

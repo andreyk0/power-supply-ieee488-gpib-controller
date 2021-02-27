@@ -475,11 +475,28 @@ impl<'a> IdleLoop<'a> {
     #[inline]
     fn handle_state(&mut self) -> Result<(), AppError> {
         let encoder_change = self.rotary_encoder.poll();
+        let pause_press = self
+            .btn_pause
+            .lock(|b| b.take_last_press(time::MilliSeconds(60)));
+
+        ifcfg!("bin_info", {
+            match pause_press {
+                None => Ok(()),
+                Some(p) => hprintln!("BTN P {}", p.0),
+            }
+        });
+
+        let mut buf: String<U64> = String::new();
+        self.ps.handle_button(pause_press, &mut buf)?;
+        if !buf.is_empty() {
+            self.uart_serial
+                .lock(|s| s.write_buf_flush(&buf.into_bytes()))?;
+        }
+
         match &mut self.ps.ui {
             UI::USSBSerial => self.handle_state_usb_serial(),
             UI::InfoScreen(is) => IdleLoop::handle_state_info_screen(
                 encoder_change,
-                &mut self.btn_pause,
                 &mut self.btn_encoder,
                 &mut self.usb_serial,
                 &mut self.uart_serial,
@@ -518,7 +535,6 @@ impl<'a> IdleLoop<'a> {
     #[inline]
     fn handle_state_info_screen(
         encoder_change: i16,
-        btn_pause: &mut resources::btn_pause<'a>,
         btn_encoder: &mut resources::btn_encoder<'a>,
         usb_serial: &mut resources::usb_serial<'a>,
         uart_serial: &mut resources::uart_serial<'a>,
@@ -528,15 +544,10 @@ impl<'a> IdleLoop<'a> {
         query_sent: &mut bool,
         is: &mut InfoScreen,
     ) -> Result<(), AppError> {
-        let pause_press = btn_pause.lock(|b| b.take_last_press(time::MilliSeconds(60)));
         let encoder_press = btn_encoder.lock(|b| b.take_last_press(time::MilliSeconds(60)));
 
         ifcfg!("bin_info", {
-            (match pause_press {
-                None => Ok(()),
-                Some(p) => hprintln!("BTN P {}", p.0),
-            })
-            .and_then(|_| match encoder_press {
+            (match encoder_press {
                 None => Ok(()),
                 Some(e) => hprintln!("BTN E {}", e.0),
             })
@@ -571,18 +582,27 @@ impl<'a> IdleLoop<'a> {
         match q? {
             None => {}
             Some(q) => {
-                let v = parse_f32(uart_line_buf)?;
+                let mut sbuf: String<U64> = String::new();
+                to_str_skip_whitespace(uart_line_buf, &mut sbuf)?;
                 uart_line_buf.clear();
+                ifcfg!("bin_info", hprintln!("qres {:?} {}", q, sbuf));
 
-                ifcfg!("bin_info", hprintln!("qres {:?} {}", q, v));
-                is.set_query_result(&q, v);
+                is.set_query_result(&q, &sbuf)?;
+
                 // send query/response to USB host
                 let mut buf: String<U64> = String::new();
                 buf.push_str(&q.to_str()).map_err(|_| AppError::Duh)?;
-                write!(buf, "\t{:.3}\r\n", v).map_err(|_| AppError::Duh)?;
+                write!(buf, "\t{}\r\n", sbuf).map_err(|_| AppError::Duh)?;
                 usb_serial.lock(|s| s.write(&buf.into_bytes()))?;
             }
         }
+
+        let mut buf: String<U64> = String::new();
+        is.handle_rotary_encoder(encoder_press, false, encoder_change, &mut buf)?;
+        if !buf.is_empty() {
+            uart_serial.lock(|s| s.write_buf_flush(&buf.into_bytes()))?;
+        }
+
         Ok(())
     }
 }
