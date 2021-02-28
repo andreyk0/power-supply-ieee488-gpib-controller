@@ -14,7 +14,7 @@ rustflags = [
   "-C", "link-arg=-Tlink.x",
 
   # https://github.com/riscv-rust/riscv-crates/issues/1
-  #"-C", "inline-threshold=255",
+  #"-C", "inline-threshold=400",
 
   # if you run into problems with LLD switch to the GNU linker by commenting out
   # this line

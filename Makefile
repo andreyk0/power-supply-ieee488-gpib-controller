@@ -27,6 +27,16 @@ flash: bin erase
 	st-info --descr
 	st-flash write $(BIN_TARGET) 0x8000000
 
+# assumes openocd is running on localhost
+openocd-flash: build
+	echo "program $(ELF_TARGET) ; reset ; exit" | nc localhost 4444
+
+openocd-start:
+	echo "arm semihosting enable; exit" | nc localhost 4444
+
+openocd-reset:
+	echo "reset; exit" | nc localhost 4444
+
 erase:
 	st-flash erase
 

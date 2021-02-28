@@ -1,10 +1,10 @@
 //! Sets up timer to capture input from a rotary encoder
 
-use stm32f1xx_hal::pac::{RCC, TIM1};
+use stm32f4xx_hal::stm32::{RCC, TIM1};
 
 pub struct RotaryEncoder {
     timer: TIM1,
-    pub count: i16,
+    count: i16,
 }
 
 impl RotaryEncoder {

@@ -6,7 +6,7 @@ use embedded_graphics::{
     egtext, fonts::*, pixelcolor::BinaryColor, prelude::*, primitives::*, style::*, text_style,
 };
 
-use stm32f1xx_hal::spi;
+use stm32f4xx_hal::spi;
 
 use heapless::{consts::*, String};
 
@@ -15,6 +15,8 @@ use crate::{delay::*, model::*, prelude::*};
 // 0 to n-1 based
 pub const WIDTH: i32 = 127;
 pub const HEIGHT: i32 = 63;
+
+const FILES_PER_SCREEN: usize = 8;
 
 pub struct Display {
     device: DisplayDevice,
@@ -58,11 +60,7 @@ impl Display {
 
         self.flush()?;
 
-        ifcfg!("render_debug", {
-            let mut delay = AsmDelay {};
-            delay.delay_us(1000000);
-            Ok::<(), ()>(())
-        });
+        ifcfg!("render_debug", self.debug_delay());
         Ok(())
     }
 
@@ -86,6 +84,7 @@ impl Display {
             UI::UILoading(s) => self.render_ui_loading(s),
             UI::USSBSerial => self.render_usb_serial(),
             UI::InfoScreen(is) => self.render_info_screen(is),
+            UI::ProjectFiles(pfs) => self.render_project_files(pfs),
         }
     }
 
@@ -177,6 +176,74 @@ impl Display {
         )
         .draw(&mut self.device)?;
 
+        Ok(())
+    }
+
+    #[inline]
+    fn render_project_files(self: &mut Self, pfs: &ProjectFiles) -> Result<(), AppError> {
+        if pfs.fnames.is_empty() {
+            egtext!(
+                text = "<<< No files >>>",
+                top_left = Point::new(2, HEIGHT / 2 - 3),
+                style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
+            )
+            .draw(&mut self.device)?;
+        } else {
+            let page_num = pfs.selected / FILES_PER_SCREEN;
+            let begin = page_num * FILES_PER_SCREEN;
+            let end = (begin + FILES_PER_SCREEN).min(pfs.fnames.len());
+            self.render_project_files_page(
+                pfs.selected % FILES_PER_SCREEN,
+                &pfs.fnames[begin..end],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn render_project_files_page(
+        self: &mut Self,
+        selected: usize,
+        fnames: &[String<U32>],
+    ) -> Result<(), AppError> {
+        let mut voffset = 2;
+        let mut idx = 0;
+
+        let p1 = Point::new(0, 0);
+        let p2 = Point::new(3, 3);
+        let p3 = Point::new(0, 6);
+        let cursor = Triangle::from_points([p1, p2, p3]);
+
+        for fname in fnames {
+            egtext!(
+                text = fname.as_str(),
+                top_left = Point::new(9, voffset),
+                style = text_style!(font = Font6x6, text_color = BinaryColor::On,)
+            )
+            .draw(&mut self.device)?;
+
+            if idx == selected {
+                cursor
+                    .translate(Point::new(3, voffset))
+                    .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
+                    .draw(&mut self.device)?;
+            }
+
+            idx += 1;
+            voffset += 7;
+
+            ifcfg!("render_debug", self.debug_delay());
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn debug_delay(&mut self) -> Result<(), AppError> {
+        let mut delay = AsmDelay {};
+        self.flush()?;
+        delay.delay_us(1000000);
         Ok(())
     }
 }

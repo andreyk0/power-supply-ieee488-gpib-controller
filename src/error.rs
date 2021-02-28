@@ -3,7 +3,7 @@
 use core::convert::Infallible;
 
 /// User visible errors
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum AppError {
     Duh,
     FmtError,
@@ -12,6 +12,7 @@ pub enum AppError {
     UartSerialError,
     DisplayError(&'static str),
     ParseError,
+    ProjectFileError,
 }
 
 impl From<Infallible> for AppError {

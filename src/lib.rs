@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(sort_internals)]
 
 #[macro_use]
 pub mod macros;

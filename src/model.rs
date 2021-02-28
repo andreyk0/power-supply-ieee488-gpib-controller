@@ -2,12 +2,12 @@
 
 use num_traits::float::FloatCore;
 
-use heapless::{ArrayLength, String};
+use heapless::{consts::*, ArrayLength, String, Vec};
 
 use rtic::cyccnt::Instant;
-use stm32f1xx_hal::time::MilliSeconds;
+use stm32f4xx_hal::time::MilliSeconds;
 
-use crate::{consts::SYS_FREQ, error::*, line::parse_str, protocol::*};
+use crate::{consts::SYS_FREQ, error::*, line::parse_str, protocol::*, sdcard::*};
 
 // Single channel settings
 pub struct PSChannel {
@@ -91,7 +91,7 @@ impl UIChannels {
     }
 
     #[inline]
-    pub fn iset_cmds<S>(&self, cmdbuf: &mut String<S>) -> Result<(), AppError>
+    fn iset_cmds<S>(&self, cmdbuf: &mut String<S>) -> Result<(), AppError>
     where
         S: ArrayLength<u8>,
     {
@@ -111,7 +111,7 @@ impl UIChannels {
     }
 
     #[inline]
-    pub fn vset_cmds<S>(&self, cmdbuf: &mut String<S>) -> Result<(), AppError>
+    fn vset_cmds<S>(&self, cmdbuf: &mut String<S>) -> Result<(), AppError>
     where
         S: ArrayLength<u8>,
     {
@@ -184,6 +184,50 @@ impl InfoScreen {
         }
     }
 
+    /// Handle "on/off" button (try to flip both channels at about the same time)
+    #[inline]
+    pub fn handle_on_off_button<S>(&mut self, cmdbuf: &mut String<S>) -> Result<(), AppError>
+    where
+        S: ArrayLength<u8>,
+    {
+        match self.has_output() {
+            Some(ha) => {
+                if ha {
+                    (Command::Out {
+                        ch: Channel::Ch1,
+                        on: false,
+                    })
+                    .append_to_str(cmdbuf)?;
+
+                    (Command::Out {
+                        ch: Channel::Ch2,
+                        on: false,
+                    })
+                    .append_to_str(cmdbuf)?;
+                } else {
+                    (Command::Out {
+                        ch: Channel::Ch1,
+                        on: true,
+                    })
+                    .append_to_str(cmdbuf)?;
+
+                    (Command::Out {
+                        ch: Channel::Ch2,
+                        on: true,
+                    })
+                    .append_to_str(cmdbuf)?;
+                }
+
+                // clear out, wait for next poll
+                self.ch1.out = None;
+                self.ch2.out = None;
+            }
+            None => (),
+        }
+
+        Ok(())
+    }
+
     pub fn handle_rotary_encoder<S>(
         &mut self,
         re_press_duration: Option<MilliSeconds>,
@@ -220,6 +264,7 @@ impl InfoScreen {
                             }
 
                             ch.fix_range();
+                            cmdbuf.clear(); // replace previous command
                             ch.vset_cmds(cmdbuf)
                         }
                         VarSelected::I => {
@@ -237,6 +282,7 @@ impl InfoScreen {
                             }
 
                             ch.fix_range();
+                            cmdbuf.clear(); // replace previous command
                             ch.iset_cmds(cmdbuf)
                         }
                     }
@@ -303,11 +349,45 @@ impl InfoScreen {
     }
 }
 
+/// List SD card root dir, load file
+pub struct ProjectFiles {
+    pub fnames: Vec<String<U32>, U64>,
+    pub selected: usize,
+}
+
+impl ProjectFiles {
+    pub fn new(sdc: &mut SDCard) -> Result<Self, AppError> {
+        let mut fnames = Vec::new();
+        sdc.list_projects_files(&mut fnames)?;
+
+        if fnames.is_empty() {
+            Err(AppError::ProjectFileError)
+        } else {
+            Ok(ProjectFiles {
+                fnames,
+                selected: 0,
+            })
+        }
+    }
+
+    pub fn handle_rotary_encoder(
+        &mut self,
+        re_press_duration: Option<MilliSeconds>,
+        re_diff: i16,
+    ) -> Result<Option<String<U32>>, AppError> {
+        self.selected = ((self.selected as i16 + re_diff).max(0) as usize).min(self.fnames.len());
+        Ok(re_press_duration
+            .filter(|pd| pd > &MilliSeconds(100))
+            .map(|_| self.fnames[self.selected].clone()))
+    }
+}
+
 /// UI states
 pub enum UI {
     UILoading(&'static str),
     USSBSerial,
     InfoScreen(InfoScreen),
+    ProjectFiles(ProjectFiles),
 }
 
 /// State of the power supply controller
@@ -323,67 +403,6 @@ impl PS {
             error: None,
             ui: UI::UILoading("Initializing..."),
         }
-    }
-
-    /// Handle "on/off" button (try to flip both channels at about the same time)
-    #[inline]
-    pub fn handle_button<S>(
-        &mut self,
-        pause_press: Option<MilliSeconds>,
-        cmdbuf: &mut String<S>,
-    ) -> Result<(), AppError>
-    where
-        S: ArrayLength<u8>,
-    {
-        match &mut self.ui {
-            UI::InfoScreen(is) => {
-                match pause_press.zip(is.has_output()) {
-                    Some((pp, ha)) if pp > MilliSeconds(100) => {
-                        PS::handle_on_off(ha, cmdbuf)?;
-                        // clear out, wait for next poll
-                        is.ch1.out = None;
-                        is.ch2.out = None;
-                        Ok(())
-                    }
-                    _ => Ok(()),
-                }
-            }
-            _ => Ok(()),
-        }
-    }
-
-    #[inline]
-    fn handle_on_off<S>(has_output: bool, cmdbuf: &mut String<S>) -> Result<(), AppError>
-    where
-        S: ArrayLength<u8>,
-    {
-        if has_output {
-            (Command::Out {
-                ch: Channel::Ch1,
-                on: false,
-            })
-            .append_to_str(cmdbuf)?;
-
-            (Command::Out {
-                ch: Channel::Ch2,
-                on: false,
-            })
-            .append_to_str(cmdbuf)?;
-        } else {
-            (Command::Out {
-                ch: Channel::Ch1,
-                on: true,
-            })
-            .append_to_str(cmdbuf)?;
-
-            (Command::Out {
-                ch: Channel::Ch2,
-                on: true,
-            })
-            .append_to_str(cmdbuf)?;
-        }
-
-        Ok(())
     }
 
     #[inline]

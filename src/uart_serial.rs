@@ -2,7 +2,7 @@ use cortex_m_semihosting::*;
 
 use nb;
 
-use stm32f1xx_hal::{prelude::*, serial::*};
+use stm32f4xx_hal::{prelude::*, serial::*};
 
 use heapless::{ArrayLength, Vec};
 
@@ -52,8 +52,8 @@ impl UartSerial {
     }
 }
 
-impl From<stm32f1xx_hal::serial::Error> for AppError {
-    fn from(_: stm32f1xx_hal::serial::Error) -> Self {
+impl From<stm32f4xx_hal::serial::Error> for AppError {
+    fn from(_: stm32f4xx_hal::serial::Error) -> Self {
         AppError::UartSerialError
     }
 }

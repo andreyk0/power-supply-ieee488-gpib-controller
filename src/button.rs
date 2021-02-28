@@ -4,10 +4,9 @@ use rtic::cyccnt::Instant;
 
 use embedded_hal::digital::v2::InputPin;
 
-use stm32f1xx_hal::{
-    afio,
+use stm32f4xx_hal::{
     gpio::{Edge, ExtiPin},
-    pac::EXTI,
+    stm32::{EXTI, SYSCFG},
     time::MilliSeconds,
 };
 
@@ -18,6 +17,7 @@ pub struct Button<Pin> {
     last_change: Instant,
     last_state: bool,
     last_push_duration_millis: Option<MilliSeconds>,
+    ignore_last_press: bool,
     pin: Pin,
 }
 
@@ -25,8 +25,8 @@ impl<Pin> Button<Pin>
 where
     Pin: InputPin + ExtiPin,
 {
-    pub fn new(mut pin: Pin, exti: &EXTI, afio: &mut afio::Parts) -> Result<Self, AppError> {
-        pin.make_interrupt_source(afio);
+    pub fn new(mut pin: Pin, exti: &mut EXTI, syscfg: &mut SYSCFG) -> Result<Self, AppError> {
+        pin.make_interrupt_source(syscfg);
         pin.trigger_on_edge(exti, Edge::RISING_FALLING);
         pin.enable_interrupt(exti);
 
@@ -35,6 +35,7 @@ where
             last_change: Instant::now(),
             last_state: pin.is_high().map_err(|_| AppError::Duh)?, // should be Infallible
             last_push_duration_millis: None,
+            ignore_last_press: false,
             pin,
         })
     }
@@ -42,13 +43,28 @@ where
     pub fn is_pressed(&self, min_press_duration: MilliSeconds) -> bool {
         let now = Instant::now();
         let cd_millis = duration_since_millis(now, self.last_change);
-        self.last_state && (cd_millis > min_press_duration)
+        (!self.last_state) && (cd_millis > min_press_duration)
     }
 
     pub fn take_last_press(&mut self, min_press_duration: MilliSeconds) -> Option<MilliSeconds> {
-        self.last_push_duration_millis
-            .take()
-            .filter(|d| d.0 >= min_press_duration.0)
+        match self.last_push_duration_millis.take() {
+            Some(d) if d.0 >= min_press_duration.0 => {
+                if self.ignore_last_press {
+                    self.ignore_last_press = false;
+                    None
+                } else {
+                    Some(d)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Don't report last press when the button is released
+    /// (e.g. don't count rotating encoder while pressed as a proper press)
+    #[inline]
+    pub fn cancel_last_press(&mut self) {
+        self.ignore_last_press = true;
     }
 
     pub fn poll(&mut self) -> Result<(), AppError> {

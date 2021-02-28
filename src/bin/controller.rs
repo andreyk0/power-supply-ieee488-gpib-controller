@@ -1,16 +1,21 @@
 #![cfg_attr(not(doc), no_main)]
 #![no_std]
 
-use panic_halt as _;
+use panic_semihosting as _;
+//TODO: use panic_halt as _;
 
 use core::fmt::Write;
 
 use cortex_m::asm;
 use cortex_m_semihosting::*;
 
-use stm32f1xx_hal::{prelude::*, serial, spi, time, usb};
+use stm32f4xx_hal::{
+    otg_fs,
+    prelude::*,
+    serial, spi,
+    time::{self, MilliSeconds},
+};
 
-use embedded_hal::digital::v2::OutputPin;
 use embedded_hal::spi as espi;
 
 use rtic::cyccnt::Duration;
@@ -28,7 +33,10 @@ use power_supply_ieee488_gpib_controller::{
     sdcard::*, time::*, uart_serial::*,
 };
 
-#[rtic::app(device = stm32f1xx_hal::stm32,
+// https://github.com/stm32-rs/stm32f4xx-hal/blob/master/examples/usb_serial.rs
+static mut USB_EP_MEMORY: [u32; 1024] = [0; 1024];
+
+#[rtic::app(device = stm32f4xx_hal::stm32,
             peripherals = true,
             monotonic = rtic::cyccnt::CYCCNT)]
 const APP: () = {
@@ -53,49 +61,50 @@ const APP: () = {
     }
 
     #[init(schedule = [ping])]
-    fn init(cx: init::Context) -> init::LateResources {
-        static mut USB_BUS: Option<bus::UsbBusAllocator<usb::UsbBus<usb::Peripheral>>> = None;
+    fn init(mut cx: init::Context) -> init::LateResources {
+        static mut USB_BUS: Option<bus::UsbBusAllocator<otg_fs::UsbBus<otg_fs::USB>>> = None;
 
-        let mut core: rtic::Peripherals = cx.core;
-        let device = cx.device;
-        let mut flash = device.FLASH.constrain();
-        let mut rcc = device.RCC.constrain();
-        let mut afio = device.AFIO.constrain(&mut rcc.apb2);
+        let mut device = cx.device;
+        let rcc = device.RCC.constrain();
 
         let clocks = rcc
             .cfgr
-            .use_hse(8.mhz())
+            .use_hse(25.mhz())
             .sysclk(SYS_FREQ)
-            .pclk1(36.mhz())
-            .freeze(&mut flash.acr);
+            .pclk1(48.mhz())
+            .require_pll48clk() // USB
+            .freeze();
 
-        ifcfg!("bin_info", hprintln!("clocks"));
-
-        assert!(clocks.usbclk_valid());
+        ifcfg!(
+            "bin_debug",
+            hprintln!(
+                "clocks sysclk {} pclk1 {}",
+                clocks.sysclk().0,
+                clocks.pclk1().0
+            )
+        );
 
         ifcfg!("bin_info", hprintln!("gpio"));
 
-        let mut gpioa = device.GPIOA.split(&mut rcc.apb2);
-        let mut gpiob = device.GPIOB.split(&mut rcc.apb2);
-        let mut gpioc = device.GPIOC.split(&mut rcc.apb2);
+        let gpioa = device.GPIOA.split();
+        let gpiob = device.GPIOB.split();
+        let gpioc = device.GPIOC.split();
 
         let mut ps = PS::new();
 
         ifcfg!("bin_info", hprintln!("display"));
 
-        let lcd_sck = gpioa.pa5.into_alternate_push_pull(&mut gpioa.crl);
-        let lcd_mosi = gpioa.pa7.into_alternate_push_pull(&mut gpioa.crl);
-        let lcd_reset = gpioa.pa6.into_push_pull_output(&mut gpioa.crl);
-        let lcd_cs = gpioa.pa4.into_push_pull_output(&mut gpioa.crl);
+        let lcd_sck = gpioa.pa5.into_alternate_af5();
+        let lcd_mosi = gpioa.pa7.into_alternate_af5();
+        let lcd_reset = gpioa.pa6.into_push_pull_output();
+        let lcd_cs = gpioa.pa4.into_push_pull_output();
 
         let lcd_spi = spi::Spi::spi1(
             device.SPI1,
             (lcd_sck, spi::NoMiso, lcd_mosi),
-            &mut afio.mapr,
             espi::MODE_0,
-            time::Hertz(600_000),
+            time::Hertz(400_000),
             clocks,
-            &mut rcc.apb2,
         );
 
         let mut display =
@@ -104,13 +113,13 @@ const APP: () = {
         ps.set_ui_loading("ping");
         display.render(&ps).unwrap();
 
-        let led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
+        let led = gpioc.pc13.into_push_pull_output();
 
         // Initialize (enable) the monotonic timer (CYCCNT)
-        core.DCB.enable_trace();
-        // required on Cortex-M7 devices that software lock the DWT (e.g. STM32F7)
+        cx.core.DCB.enable_trace();
+        // required on Cortex-M7 devices that software lock the DWT
         cortex_m::peripheral::DWT::unlock();
-        core.DWT.enable_cycle_counter();
+        cx.core.DWT.enable_cycle_counter();
 
         cx.schedule
             .ping(cx.start + Duration::from_cycles(SYS_FREQ.0 / 2))
@@ -119,28 +128,19 @@ const APP: () = {
         ps.set_ui_loading("usbp");
         display.render(&ps).unwrap();
 
-        // BluePill board has a pull-up resistor on the D+ line.
-        // Pull the D+ pin down to send a RESET condition to the USB bus.
-        // This forced reset is needed only for development, without it host
-        // will not reset your device when you upload new firmware.
-        let mut usb_dp = gpioa.pa12.into_push_pull_output(&mut gpioa.crh);
-        usb_dp.set_low().unwrap();
-        asm::delay(clocks.sysclk().0 / 10);
-
-        let usb_dm = gpioa.pa11;
-        let usb_dp = usb_dp.into_floating_input(&mut gpioa.crh);
-
-        let usbp = usb::Peripheral {
-            usb: device.USB,
-            pin_dm: usb_dm,
-            pin_dp: usb_dp,
+        let usbp = otg_fs::USB {
+            usb_global: device.OTG_FS_GLOBAL,
+            usb_device: device.OTG_FS_DEVICE,
+            usb_pwrclk: device.OTG_FS_PWRCLK,
+            pin_dm: gpioa.pa11.into_alternate_af10(),
+            pin_dp: gpioa.pa12.into_alternate_af10(),
         };
 
         ps.set_ui_loading("usb_bus");
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("usb_bus"));
 
-        *USB_BUS = Some(usb::UsbBus::new(usbp));
+        *USB_BUS = unsafe { Some(otg_fs::UsbBus::new(usbp, &mut USB_EP_MEMORY)) };
         let usb_bus = USB_BUS.as_ref().unwrap();
 
         ps.set_ui_loading("usb_serial");
@@ -153,17 +153,18 @@ const APP: () = {
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("uart_serial"));
 
-        let pin_tx = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
-        let pin_rx = gpioa.pa3;
+        let pin_tx = gpioa.pa15.into_alternate_af7();
+        let pin_rx = gpioa.pa10.into_alternate_af7();
 
-        let mut uart_serial = UartSerial::new(serial::Serial::usart2(
-            device.USART2,
-            (pin_tx, pin_rx),
-            &mut afio.mapr,
-            serial::Config::default(),
-            clocks,
-            &mut rcc.apb1,
-        ));
+        let mut uart_serial = UartSerial::new(
+            serial::Serial::usart1(
+                device.USART1,
+                (pin_tx, pin_rx),
+                serial::config::Config::default().baudrate(115_200.bps()),
+                clocks,
+            )
+            .unwrap(),
+        );
 
         uart_serial.init();
 
@@ -171,38 +172,41 @@ const APP: () = {
         display.render(&ps).unwrap();
         ifcfg!("bin_info", hprintln!("sd_card"));
 
-        let sd_sck = gpiob.pb13.into_alternate_push_pull(&mut gpiob.crh);
-        let sd_miso = gpiob.pb14;
-        let sd_mosi = gpiob.pb15.into_alternate_push_pull(&mut gpiob.crh);
-        let sd_cs = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
+        let sd_sck = gpiob.pb13.into_alternate_af5();
+        let sd_miso = gpiob.pb14.into_alternate_af5();
+        let sd_mosi = gpiob.pb15.into_alternate_af5();
+        let sd_cs = gpiob.pb12.into_push_pull_output();
+
+        asm::delay(SYS_FREQ.0 / 4);
 
         let sd_spi = spi::Spi::spi2(
             device.SPI2,
             (sd_sck, sd_miso, sd_mosi),
             espi::MODE_0,
-            time::Hertz(400_000),
+            time::Hertz(100_000),
             clocks,
-            &mut rcc.apb1,
         );
 
         let sdcard = SDCard::new(embedded_sdmmc::Controller::new(
             embedded_sdmmc::SdMmcSpi::new(sd_spi, sd_cs),
             DummyTimeSource {},
-        ));
+        ))
+        .unwrap();
 
         ps.set_ui_loading("buttons");
         display.render(&ps).unwrap();
-        let btn_pause_pin = gpiob.pb0.into_pull_up_input(&mut gpiob.crl);
-        let btn_pause = Button::new(btn_pause_pin, &device.EXTI, &mut afio).unwrap();
+        let btn_pause_pin = gpioa.pa1.into_pull_up_input();
+        let btn_pause = Button::new(btn_pause_pin, &mut device.EXTI, &mut device.SYSCFG).unwrap();
 
-        let btn_encoder_pin = gpioa.pa10.into_pull_up_input(&mut gpioa.crh);
-        let btn_encoder = Button::new(btn_encoder_pin, &device.EXTI, &mut afio).unwrap();
+        let btn_encoder_pin = gpioa.pa2.into_pull_up_input();
+        let btn_encoder =
+            Button::new(btn_encoder_pin, &mut device.EXTI, &mut device.SYSCFG).unwrap();
 
         ps.set_ui_loading("rotary encoder");
         display.render(&ps).unwrap();
 
-        gpioa.pa8.into_pull_up_input(&mut gpioa.crh);
-        gpioa.pa9.into_pull_up_input(&mut gpioa.crh);
+        gpioa.pa8.into_pull_up_input();
+        gpioa.pa9.into_pull_up_input();
         let rotary_encoder = RotaryEncoder::new(device.TIM1);
 
         ps.set_ui_loading("resources");
@@ -253,10 +257,9 @@ const APP: () = {
             il.handle_state_ok();
         }
     }
-
     #[task(resources = [query, query_idx],
-           schedule = [ping],
-           priority = 1)]
+               schedule = [ping],
+               priority = 1)]
     fn ping(cx: ping::Context) {
         let q = cx.resources.query;
         let qidx = cx.resources.query_idx;
@@ -270,40 +273,41 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(binds = EXTI0,
-        resources = [btn_pause],
-        priority = 2)]
+    #[task(binds = EXTI1,
+            resources = [btn_pause],
+            priority = 2)]
     fn btn_pause_poll(cx: btn_pause_poll::Context) {
         cx.resources.btn_pause.poll().unwrap();
     }
 
-    #[task(binds = EXTI15_10,
-        resources = [btn_encoder],
-        priority = 2)]
+    #[task(binds = EXTI2,
+            resources = [btn_encoder],
+            priority = 2)]
     fn btn_encoder_poll(cx: btn_encoder_poll::Context) {
         cx.resources.btn_encoder.poll().unwrap();
     }
 
-    #[task(binds = USART2,
-        resources = [uart_serial, uart_rx_buf],
-        priority = 3)]
+    #[task(binds = USART1,
+            resources = [uart_serial, uart_rx_buf],
+            priority = 3)]
     fn uart_poll(cx: uart_poll::Context) {
         let uart_serial = cx.resources.uart_serial;
         let mut uart_rx_buf = cx.resources.uart_rx_buf;
         uart_serial.fill_buf(&mut uart_rx_buf).unwrap();
     }
 
-    #[task(binds = USB_HP_CAN_TX,
-            resources = [usb_serial],
-            priority = 4)]
-    fn usb_tx(cx: usb_tx::Context) {
+    #[task(binds = OTG_FS_WKUP,
+                resources = [usb_serial, usb_rx_buf],
+                priority = 4)]
+    fn usb_fs_wkup(cx: usb_fs_wkup::Context) {
         cx.resources.usb_serial.poll();
     }
 
-    #[task(binds = USB_LP_CAN_RX0,
-            resources = [usb_serial, usb_rx_buf],
-            priority = 4)]
-    fn usb_rx(cx: usb_rx::Context) {
+    #[task(binds = OTG_FS,
+                resources = [usb_serial, usb_rx_buf],
+                priority = 4)]
+    fn usb_otg_fs(cx: usb_otg_fs::Context) {
+        cx.resources.usb_serial.poll();
         let usb_serial = cx.resources.usb_serial;
         let mut usb_rx_buf = cx.resources.usb_rx_buf;
         usb_serial.read(&mut usb_rx_buf).unwrap();
@@ -312,13 +316,17 @@ const APP: () = {
     // RTIC requires that unused interrupts are declared in an extern block when
     // using software tasks; these free interrupts will be used to dispatch the
     // software tasks.
-    // Full list in  stm32f1::stm32f103::Interrupt
+    // Full list in stm32f4::stm32f411::Interrupt
     extern "C" {
-        fn EXTI4();
-        fn FSMC();
-        fn TAMPER();
-        fn CAN_RX1();
-        fn CAN_SCE();
+        fn DMA2_STREAM0();
+        fn DMA2_STREAM1();
+        fn DMA2_STREAM2();
+        fn DMA2_STREAM3();
+        fn DMA2_STREAM4();
+        fn I2C1_ER();
+        fn I2C1_EV();
+        fn I2C2_ER();
+        fn I2C2_EV();
     }
 };
 
@@ -328,8 +336,12 @@ struct IdleLoop<'a> {
     usb_rx_buf: resources::usb_rx_buf<'a>,
     uart_serial: resources::uart_serial<'a>,
     uart_rx_buf: resources::uart_rx_buf<'a>,
+
     query: resources::query<'a>,
     query_sent: bool,
+
+    next_command: String<U64>,
+
     ps: &'a mut PS,
     display: &'a mut Display,
     sdc: &'a mut SDCard,
@@ -351,8 +363,11 @@ impl<'a> IdleLoop<'a> {
             usb_rx_buf: cx.resources.usb_rx_buf,
             uart_serial: cx.resources.uart_serial,
             uart_rx_buf: cx.resources.uart_rx_buf,
+
             query: cx.resources.query,
             query_sent: false,
+            next_command: String::new(),
+
             ps: cx.resources.ps,
             display: cx.resources.display,
             sdc: cx.resources.sdcard,
@@ -394,6 +409,7 @@ impl<'a> IdleLoop<'a> {
         self.show_err(fun).ok();
     }
 
+    #[inline]
     pub fn boot(&mut self) -> Result<(), AppError> {
         self.render_loading(".,.,.")?;
 
@@ -409,14 +425,35 @@ impl<'a> IdleLoop<'a> {
             let sdc = &mut slf.sdc;
             // we won't receive anything while sending the whole file but that's Ok
             slf.uart_serial
-                .lock(|us| sdc.send_file("BOOT", |buf| us.write_buf_flush(buf)))
+                .lock(|us| sdc.send_boot_file(|buf| us.write_buf_flush(buf)))
         });
 
-        self.drain_uart_rx(); // in case there's any junk from loading a boot file
+        self.drain_uart_rx(); // in case there's any junk from loading a file
+        self.render_loading("DONE")?;
+        self.ps.set_ui_info_screen();
+        Ok(())
+    }
+
+    pub fn load_project_file<'f>(&mut self, fname: &'f str) -> Result<(), AppError> {
+        ifcfg!("bin_info", hprintln!("load_project_file {}", fname));
+
+        self.drain_uart_rx(); // if there are any query results queued up
+
+        self.render_loading(".,.,.")?;
+
+        self.show_err_ok(|slf| {
+            let sdc = &mut slf.sdc;
+            // we won't receive anything while sending the whole file but that's Ok
+            slf.uart_serial
+                .lock(|us| sdc.send_file(fname, |buf| us.write_buf_flush(buf)))
+        });
+
+        self.drain_uart_rx(); // in case there's any junk from loading a file
         self.render_loading("DONE")?;
 
         self.ps.set_ui_info_screen();
 
+        ifcfg!("bin_info", hprintln!("load_project_file DONE {}", fname));
         Ok(())
     }
 
@@ -462,7 +499,11 @@ impl<'a> IdleLoop<'a> {
             self.uart_rx_buf.lock(|b| fill_until_eol(uart_line_buf, b));
             uart_line_buf.clear();
         }
+
+        self.next_command.clear();
         self.uart_eol = false;
+        self.query_sent = false;
+        self.query.lock(|qopt| qopt.take());
     }
 
     /// Main loop, ignore errors or crash completely on this level
@@ -475,38 +516,63 @@ impl<'a> IdleLoop<'a> {
     #[inline]
     fn handle_state(&mut self) -> Result<(), AppError> {
         let encoder_change = self.rotary_encoder.poll();
-        let pause_press = self
+        let button_press = self
             .btn_pause
             .lock(|b| b.take_last_press(time::MilliSeconds(60)));
 
         ifcfg!("bin_info", {
-            match pause_press {
+            match button_press {
                 None => Ok(()),
                 Some(p) => hprintln!("BTN P {}", p.0),
             }
         });
 
-        let mut buf: String<U64> = String::new();
-        self.ps.handle_button(pause_press, &mut buf)?;
-        if !buf.is_empty() {
-            self.uart_serial
-                .lock(|s| s.write_buf_flush(&buf.into_bytes()))?;
+        match button_press {
+            None => (),
+            Some(pp) => {
+                if pp > MilliSeconds(700) {
+                    let pfs = ProjectFiles::new(self.sdc)?;
+                    self.ps.ui = UI::ProjectFiles(pfs);
+                }
+            }
         }
 
         match &mut self.ps.ui {
+            UI::UILoading(_) => Ok(()),
             UI::USSBSerial => self.handle_state_usb_serial(),
-            UI::InfoScreen(is) => IdleLoop::handle_state_info_screen(
-                encoder_change,
-                &mut self.btn_encoder,
-                &mut self.usb_serial,
-                &mut self.uart_serial,
-                &mut self.uart_eol,
-                &mut self.uart_line_buf,
-                &mut self.query,
-                &mut self.query_sent,
-                is,
-            ),
-            _ => Ok(()),
+            UI::InfoScreen(is) => {
+                match button_press {
+                    None => (),
+                    Some(pp) => {
+                        if pp > MilliSeconds(100) {
+                            self.next_command.clear(); // replace previous command
+                            is.handle_on_off_button(&mut self.next_command)?;
+                        }
+                    }
+                }
+
+                IdleLoop::handle_state_info_screen(
+                    encoder_change,
+                    &mut self.btn_encoder,
+                    &mut self.usb_serial,
+                    &mut self.uart_serial,
+                    &mut self.uart_eol,
+                    &mut self.uart_line_buf,
+                    &mut self.query,
+                    &mut self.query_sent,
+                    &mut self.next_command,
+                    is,
+                )
+            }
+            UI::ProjectFiles(pfs) => {
+                let re_press_duration = self
+                    .btn_encoder
+                    .lock(|b| b.take_last_press(time::MilliSeconds(60)));
+                match pfs.handle_rotary_encoder(re_press_duration, encoder_change)? {
+                    Some(fname) => self.load_project_file(&fname),
+                    None => Ok(()),
+                }
+            }
         }
     }
 
@@ -542,9 +608,18 @@ impl<'a> IdleLoop<'a> {
         uart_line_buf: &mut Vec<u8, U64>,
         query: &mut resources::query<'a>,
         query_sent: &mut bool,
+        next_command: &mut String<U64>,
         is: &mut InfoScreen,
     ) -> Result<(), AppError> {
-        let encoder_press = btn_encoder.lock(|b| b.take_last_press(time::MilliSeconds(60)));
+        let (encoder_press, btn_encoder_is_pressed) = btn_encoder.lock(|b| {
+            if encoder_change != 0 {
+                b.cancel_last_press()
+            }
+            (
+                b.take_last_press(time::MilliSeconds(60)),
+                b.is_pressed(time::MilliSeconds(30)),
+            )
+        });
 
         ifcfg!("bin_info", {
             (match encoder_press {
@@ -559,6 +634,17 @@ impl<'a> IdleLoop<'a> {
                 }
             })
         });
+
+        // send latest command when there's no active query
+        if (!(*query_sent)) && (!next_command.is_empty()) {
+            unsafe {
+                uart_serial.lock(|s| s.write_buf_flush(next_command.as_mut_vec()))?;
+            }
+
+            ifcfg!("bin_debug", hprintln!("sent {}", next_command));
+            next_command.clear();
+            asm::delay(SYS_FREQ.0 / 100);
+        }
 
         let q = query.lock(|qopt| match qopt {
             None => Ok::<Option<Query>, AppError>(None),
@@ -585,7 +671,7 @@ impl<'a> IdleLoop<'a> {
                 let mut sbuf: String<U64> = String::new();
                 to_str_skip_whitespace(uart_line_buf, &mut sbuf)?;
                 uart_line_buf.clear();
-                ifcfg!("bin_info", hprintln!("qres {:?} {}", q, sbuf));
+                ifcfg!("bin_debug", hprintln!("qres {:?} {}", q, sbuf));
 
                 is.set_query_result(&q, &sbuf)?;
 
@@ -597,11 +683,12 @@ impl<'a> IdleLoop<'a> {
             }
         }
 
-        let mut buf: String<U64> = String::new();
-        is.handle_rotary_encoder(encoder_press, false, encoder_change, &mut buf)?;
-        if !buf.is_empty() {
-            uart_serial.lock(|s| s.write_buf_flush(&buf.into_bytes()))?;
-        }
+        is.handle_rotary_encoder(
+            encoder_press,
+            btn_encoder_is_pressed,
+            encoder_change,
+            next_command,
+        )?;
 
         Ok(())
     }
