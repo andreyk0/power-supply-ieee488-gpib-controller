@@ -1,5 +1,3 @@
 ++default
 ++addr 5
 clr
-vset 1 3.3
-vset 2 5

@@ -1,0 +1,5 @@
+clr
+vset 1 6
+iset 1 0.1
+vset 2 6
+iset 2 0.1
